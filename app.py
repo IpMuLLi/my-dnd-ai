@@ -191,4 +191,4 @@ else:
             st.session_state.ultimo_tiro = None
             salva_gioco()
             st.rerun()
-            
+        
