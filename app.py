@@ -1,102 +1,88 @@
 import streamlit as st
 import google.generativeai as genai
 import random
-import re
 
-# --- CONFIGURAZIONE GEMINI ---
+# --- CONFIGURAZIONE CORE 2026 ---
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
-# --- INIZIALIZZAZIONE MEMORIA ---
+# --- FUNZIONE PER CARICARE LA STORIA ---
+def carica_storia(file_caricato):
+    if file_caricato is not None:
+        stringio = file_caricato.getvalue().decode("utf-8")
+        linee = stringio.split("\n\n")
+        nuovi_messaggi = []
+        for linea in linee:
+            if ":" in linea:
+                ruolo, contenuto = linea.split(":", 1)
+                nuovi_messaggi.append({"role": ruolo.lower().strip(), "content": contenuto.strip()})
+        st.session_state.messages = nuovi_messaggi
+        st.success("Avventura caricata con successo!")
+
+# --- INIZIALIZZAZIONE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "hp" not in st.session_state:
     st.session_state.hp = 20
 if "inventario" not in st.session_state:
-    st.session_state.inventario = ["Spada corta", "Razioni", "Corda"]
-if "ultimo_tiro" not in st.session_state:
-    st.session_state.ultimo_tiro = None
+    st.session_state.inventario = ["Spada lunga", "Pozione di cura"]
 
-# --- FUNZIONE PER GESTIRE I DANNI AUTOMATICI ---
-def controlla_danni(testo_ai):
-    # Cerca nel testo frasi come "perdi 5 HP" o "subisci 3 danni"
-    numeri = re.findall(r'(\d+)\s*(?:danni|HP|punti vita)', testo_ai.lower())
-    if numeri:
-        danno = int(numeri[0])
-        st.session_state.hp -= danno
-        return danno
-    return 0
-
-# --- INTERFACCIA LATERALE (SIDEBAR) ---
+# --- SIDEBAR 2026 ---
 with st.sidebar:
-    st.title("🛡️ Scheda Personaggio")
-    st.metric(label="Punti Vita (HP)", value=st.session_state.hp)
+    st.title("🧝 Scheda Eroe")
+    st.metric("Punti Vita", f"{st.session_state.hp} / 20")
+    st.progress(max(0, st.session_state.hp / 20))
     
-    st.write("**Inventario:**")
-    for oggetto in st.session_state.inventario:
-        st.write(f"- {oggetto}")
+    st.subheader("🎒 Zaino")
+    st.write(", ".join(st.session_state.inventario))
     
-    st.divider()
-    
-    if st.button("🎲 Lancia d20"):
+    if st.button("🎲 Tira d20", use_container_width=True):
         st.session_state.ultimo_tiro = random.randint(1, 20)
-        st.info(f"Hai lanciato un {st.session_state.ultimo_tiro}!")
+        st.toast(f"Hai ottenuto un {st.session_state.ultimo_tiro}!")
 
     st.divider()
     
-    # TASTO PER SALVARE (MEMORIA STORICA)
-    st.subheader("Memoria Storica")
-    storia_completa = ""
-    for m in st.session_state.messages:
-        storia_completa += f"{m['role'].upper()}: {m['content']}\n\n"
+    # GESTIONE SALVATAGGI (MEMORIA)
+    st.subheader("💾 Memoria Storica")
     
-    st.download_button(
-        label="💾 Scarica Avventura",
-        data=storia_completa,
-        file_name="avventura_dnd.txt",
-        mime="text/plain"
-    )
+    # Tasto Scarica
+    full_history = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+    st.download_button("Scarica Salvataggio", full_history, file_name="salvataggio_dnd.txt")
+    
+    # Caricamento File
+    file_da_caricare = st.file_uploader("Carica un'avventura", type=["txt"])
+    if st.button("Conferma Caricamento"):
+        carica_storia(file_da_caricare)
 
-# --- INTERFACCIA CHAT ---
-st.title("🐉 D&D Master AI")
+# --- LOGICA CHAT ---
+st.title("🧙‍♂️ DM Gemini 2.5 Flash Lite")
 
-# Visualizza i messaggi precedenti
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+if not st.session_state.messages:
+    intro = model.generate_content("Sei un DM. Inizia l'avventura e chiedimi chi sono.")
+    st.session_state.messages.append({"role": "assistant", "content": intro.text})
 
-# Input dell'utente
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
 if prompt := st.chat_input("Cosa fai?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    system_prompt = f"HP: {st.session_state.hp}, DADO: {st.session_state.get('ultimo_tiro', 'N/A')}. Se subisco danni scrivi [[DANNO:X]]."
+    
     with st.chat_message("assistant"):
-        # ISTRUZIONI DI SISTEMA (IL DM GUIDA IL GIOCO)
-        system_instruction = f"""
-        Sei un Dungeon Master di D&D 5e esperto e narrativo.
-        Punti Vita Giocatore: {st.session_state.hp}.
-        Inventario: {st.session_state.inventario}.
-        Ultimo dado lanciato: {st.session_state.ultimo_tiro}.
+        response = model.generate_content(system_prompt + "\n" + prompt)
+        output = response.text
         
-        REGOLE IMPORTANTI:
-        1. Se il giocatore subisce danni, scrivi esplicitamente 'perdi X HP' (es. 'L'orco ti colpisce, perdi 4 HP').
-        2. Guida tu l'avventura: non aspettare che il giocatore faccia tutto, descrivi l'ambiente e proponi 2 o 3 scelte possibili alla fine di ogni messaggio.
-        3. Sii descrittivo e mantieni il tono fantasy.
-        """
-        
-        # Generazione risposta
-        response = model.generate_content(system_instruction + "\n" + prompt)
-        testo_risposta = response.text
-        
-        # Controllo danni automatico
-        danno_subito = controlla_danni(testo_risposta)
-        if danno_subito > 0:
-            st.warning(f"⚠️ Attenzione! Hai perso {danno_subito} HP!")
-            
-        st.markdown(testo_risposta)
-        st.session_state.messages.append({"role": "assistant", "content": testo_risposta})
-        
-        # Reset del dado dopo che è stato usato
+        if "[[DANNO:" in output:
+            try:
+                danno = int(output.split("[[DANNO:")[1].split("]]")[0])
+                st.session_state.hp -= danno
+            except: pass
+
+        st.markdown(output)
+        st.session_state.messages.append({"role": "assistant", "content": output})
         st.session_state.ultimo_tiro = None
         
