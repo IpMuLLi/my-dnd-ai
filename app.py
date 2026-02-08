@@ -14,7 +14,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
-# Modello Gemini 2.5 Flash (Target 2026)
+# Modello Gemini 2.5 Flash
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 1. FUNZIONI TECNICHE (PRESERVATE) ---
@@ -29,7 +29,8 @@ def calcola_mod(punteggio):
 def genera_img(descrizione, tipo):
     try:
         seed = random.randint(1, 99999)
-        prompt_base = f"Dungeons and Dragons high fantasy, {tipo}: {descrizione}, cinematic lighting, detailed digital art, 8k"
+        # Prompt arricchito per evitare descrizioni troncate
+        prompt_base = f"Dungeons and Dragons high fantasy, {tipo}: {descrizione}, cinematic lighting, detailed digital art, 8k, concept art style"
         prompt_encoded = urllib.parse.quote(prompt_base)
         url = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
         img_data = {"url": url, "caption": f"{tipo}: {descrizione[:30]}..."}
@@ -142,12 +143,10 @@ if st.session_state.game_phase == "creazione":
         if up_file:
             try:
                 data = json.load(up_file)
-                for k, v in data.items():
-                    st.session_state[k] = v
-                st.success("Salvataggio caricato con successo!")
+                for k, v in data.items(): st.session_state[k] = v
+                st.success("Salvataggio caricato!")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Errore nel caricamento: {e}")
+            except: st.error("Errore caricamento.")
     
     st.divider()
 
@@ -160,7 +159,6 @@ if st.session_state.game_phase == "creazione":
         for i, (s, v) in enumerate(st.session_state.temp_stats.items()):
             cols[i%3].metric(s, v)
         
-        # FIX REROLL: Aggiorna senza svuotare per non tornare indietro
         if st.button("🔄 Reroll"):
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
@@ -172,25 +170,14 @@ if st.session_state.game_phase == "creazione":
             
             if st.form_submit_button("Inizia Avventura") and nome:
                 slots = 3 if classe in ["Mago", "Chierico"] else (2 if classe == "Ranger" else 0)
-                mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
-                hp_tot = DADI_VITA[classe] + mod_cos
+                hp_tot = DADI_VITA[classe] + calcola_mod(st.session_state.temp_stats["Costituzione"])
                 
                 st.session_state.update({
-                    "personaggio": {
-                        "nome": nome, "classe": classe, "razza": razza, 
-                        "stats": st.session_state.temp_stats, 
-                        "competenze": COMPETENZE_CLASSE[classe]
-                    },
-                    "hp_max": hp_tot, "hp": hp_tot,
-                    "inventario": EQUIPAGGIAMENTO_STANDARD[classe],
-                    "spell_slots_max": slots, "spell_slots_curr": slots,
-                    "game_phase": "playing"
+                    "personaggio": {"nome": nome, "classe": classe, "razza": razza, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[classe]},
+                    "hp_max": hp_tot, "hp": hp_tot, "inventario": EQUIPAGGIAMENTO_STANDARD[classe],
+                    "spell_slots_max": slots, "spell_slots_curr": slots, "game_phase": "playing"
                 })
-                
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": f"[[INTRODUZIONE]] Benvenuto, {nome}. La tua storia ha inizio..."
-                })
+                st.session_state.messages.append({"role": "assistant", "content": "[[INTRODUZIONE]]"})
                 st.rerun()
 
 else:
@@ -212,78 +199,53 @@ else:
         st.session_state.spell_slots_curr = st.session_state.spell_slots_max
         st.success("Riposo Lungo completato!")
 
-    if st.session_state.ultimo_tiro: st.info(f"🎲 Risultato del Dado: **{st.session_state.ultimo_tiro}**")
+    if st.session_state.ultimo_tiro: st.info(f"🎲 Risultato: **{st.session_state.ultimo_tiro}**")
 
-    # Visualizzazione Messaggi (con immagini integrate nella chat)
+    # Visualizzazione Messaggi
     for msg in st.session_state.messages:
-        if "[[INTRODUZIONE]]" not in msg["content"]:
+        if msg["content"] != "[[INTRODUZIONE]]":
             with st.chat_message(msg["role"]):
-                # Se il messaggio contiene un'immagine associata (salvata in gallery)
                 st.markdown(msg["content"])
-                if "image_url" in msg:
-                    st.image(msg["image_url"], use_container_width=True)
+                if "image_url" in msg: st.image(msg["image_url"], use_container_width=True)
 
-    # Trigger Introduzione
-    if len(st.session_state.messages) == 1 and "[[INTRODUZIONE]]" in st.session_state.messages[0]["content"]:
+    # Trigger Introduzione Corretto
+    if len(st.session_state.messages) > 0 and st.session_state.messages[-1]["content"] == "[[INTRODUZIONE]]":
         with st.chat_message("assistant"):
-            intro_prompt = f"Sei il DM. Introduci l'avventura per {st.session_state.personaggio['nome']}, {st.session_state.personaggio['razza']} {st.session_state.personaggio['classe']}. Equipaggiamento: {st.session_state.inventario}. Usa [[LUOGO:descrizione]]."
-            response = model.generate_content(intro_prompt).text
-            img_url = None
-            if "[[LUOGO:" in response:
-                loc = response.split("[[LUOGO:")[1].split("]]")[0]
-                img_url = genera_img(loc, "Scenario Iniziale")
-            clean_intro = re.sub(r'\[\[.*?\]\]', '', response).strip()
-            st.markdown(clean_intro)
+            intro_p = f"Sei il DM. Introduci l'inizio dell'avventura per {st.session_state.personaggio['nome']}. Scenario: Bosco oscuro, fuoco da campo. Obbligatorio usare [[LUOGO:Bosco di notte al fuoco da campo]] alla fine. Non lasciare frasi a metà."
+            res = model.generate_content(intro_p).text
+            img_url = genera_img(res.split("[[LUOGO:")[1].split("]]")[0] if "[[LUOGO:" in res else "Foresta fantasy", "Inizio")
+            clean = re.sub(r'\[\[.*?\]\]', '', res).strip()
+            st.markdown(clean)
             if img_url: st.image(img_url, use_container_width=True)
-            
-            # Salviamo l'URL nell'oggetto messaggio per la persistenza
-            st.session_state.messages[0]["content"] = clean_intro
-            if img_url: st.session_state.messages[0]["image_url"] = img_url
+            st.session_state.messages[-1] = {"role": "assistant", "content": clean, "image_url": img_url}
             st.rerun()
 
-    # Chat Input & DM Engine
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        sys_p = f"""DM 5e. PG: {st.session_state.personaggio}. LV: {st.session_state.livello}. 
-        Tiro: {st.session_state.ultimo_tiro if st.session_state.ultimo_tiro else 'Nessuno'}.
-        Tag obbligatori: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[ITEM:nome]], [[DIARIO:testo]]."""
+        sys_p = f"DM 5e. PG: {st.session_state.personaggio}. Tiro: {st.session_state.ultimo_tiro}. TAG OBBLIGATORI: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[ITEM:nome]], [[DIARIO:testo]]. Non troncare mai le frasi."
         
         with st.chat_message("assistant"):
             full_res = model.generate_content(sys_p + "\n" + prompt).text
             img_url = None
+            if "[[LUOGO:" in full_res:
+                img_url = genera_img(full_res.split("[[LUOGO:")[1].split("]]")[0], "Luogo")
             
-            # Parsing dei Tag
-            if "[[LUOGO:" in full_res: 
-                loc = full_res.split("[[LUOGO:")[1].split("]]")[0]
-                img_url = genera_img(loc, "Luogo")
-            
+            # Parsing meccanico
             d_match = re.search(r'\[\[DANNO:(\d+)\]\]', full_res)
             if d_match: st.session_state.hp -= int(d_match.group(1))
-            
             o_match = re.search(r'\[\[ORO:(-?\d+)\]\]', full_res)
             if o_match: st.session_state.oro += int(o_match.group(1))
-            
             x_match = re.search(r'\[\[XP:(\d+)\]\]', full_res)
             if x_match: 
                 st.session_state.xp += int(x_match.group(1))
                 check_level_up()
-                
             i_match = re.search(r'\[\[ITEM:(.*?)\]\]', full_res)
             if i_match: st.session_state.inventario.append(i_match.group(1).strip())
-            
-            if "[[DIARIO:" in full_res: 
-                st.session_state.diario += "\n- " + full_res.split("[[DIARIO:")[1].split("]]")[0]
             
             clean_res = re.sub(r'\[\[.*?\]\]', '', full_res).strip()
             st.markdown(clean_res)
             if img_url: st.image(img_url, use_container_width=True)
-            
-            # Aggiunta al log con immagine per persistenza
-            new_msg = {"role": "assistant", "content": clean_res}
-            if img_url: new_msg["image_url"] = img_url
-            st.session_state.messages.append(new_msg)
-            
+            st.session_state.messages.append({"role": "assistant", "content": clean_res, "image_url": img_url})
             st.session_state.ultimo_tiro = None
             st.rerun()
             
