@@ -14,7 +14,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
-# Modello Gemini 2.5 Flash
+# Modello Gemini 2.5 Flash (Target 2026)
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 1. FUNZIONI TECNICHE (PRESERVATE) ---
@@ -38,11 +38,10 @@ def genera_img(descrizione, tipo):
         return url
     except: return None
 
-# --- 2. LOGICA XP, LIVELLO & ABILITÀ (EVOLUTA) ---
+# --- 2. LOGICA XP, LIVELLO & ABILITÀ (PRESERVATA) ---
 SOGLIE_XP = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 DADI_VITA = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
 
-# Mappatura Abilità su Statistiche (SRD 5e)
 SKILL_MAP = {
     "Atletica": "Forza", "Furtività": "Destrezza", "Rapidità di mano": "Destrezza",
     "Arcano": "Intelligenza", "Storia": "Intelligenza", "Indagare": "Intelligenza",
@@ -110,9 +109,10 @@ with st.sidebar:
             st.divider()
             st.caption("Abilità con Competenza:")
             for skill in st.session_state.personaggio["competenze"]:
-                stat_relativa = SKILL_MAP[skill]
-                bonus_finale = calcola_mod(st.session_state.personaggio['stats'][stat_relativa]) + prof
-                st.write(f"✅ {skill}: {bonus_finale:+}")
+                if skill in SKILL_MAP:
+                    stat_relativa = SKILL_MAP[skill]
+                    bonus_finale = calcola_mod(st.session_state.personaggio['stats'][stat_relativa]) + prof
+                    st.write(f"✅ {skill}: {bonus_finale:+}")
 
         with st.expander("🎒 Equipaggiamento"):
             for item in st.session_state.inventario: st.write(f"- {item}")
@@ -126,6 +126,10 @@ with st.sidebar:
             for img in reversed(st.session_state.gallery):
                 st.image(img["url"], caption=img["caption"])
 
+        # Esporta Salvataggio sempre disponibile in Sidebar
+        save_data = json.dumps({k: v for k, v in st.session_state.items() if k != "GEMINI_API_KEY"}, indent=4)
+        st.download_button("💾 Esporta Salvataggio", save_data, file_name=f"sav_{st.session_state.personaggio['nome']}.json", use_container_width=True)
+
         if st.button("🗑️ Reset"):
             st.session_state.clear()
             st.rerun()
@@ -134,6 +138,21 @@ with st.sidebar:
 if st.session_state.game_phase == "creazione":
     st.title("🎲 Creazione Personaggio")
     
+    # --- RECUPERATO: CARICAMENTO SALVATAGGIO ---
+    with st.expander("📂 Carica Personaggio Esistente"):
+        up_file = st.file_uploader("Carica file .json", type="json")
+        if up_file:
+            try:
+                data = json.load(up_file)
+                for k, v in data.items():
+                    st.session_state[k] = v
+                st.success("Salvataggio caricato con successo!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore nel caricamento: {e}")
+    
+    st.divider()
+
     if not st.session_state.temp_stats:
         if st.button("🎲 Lancia Caratteristiche"):
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
@@ -142,6 +161,10 @@ if st.session_state.game_phase == "creazione":
         cols = st.columns(3)
         for i, (s, v) in enumerate(st.session_state.temp_stats.items()):
             cols[i%3].metric(s, v)
+        
+        if st.button("🔄 Reroll"):
+            st.session_state.temp_stats = {}
+            st.rerun()
 
         with st.form("creazione_finale"):
             nome = st.text_input("Nome dell'Eroe")
@@ -165,10 +188,10 @@ if st.session_state.game_phase == "creazione":
                     "game_phase": "playing"
                 })
                 
-                # Trigger per introduzione automatica
+                # Inizializzazione messaggio introduzione
                 st.session_state.messages.append({
                     "role": "assistant", 
-                    "content": f"[[INTRODUZIONE]] Benvenuto, {nome} il {classe}. La tua leggenda ha inizio ora..."
+                    "content": f"[[INTRODUZIONE]] Benvenuto, {nome}. La tua storia ha inizio..."
                 })
                 st.rerun()
 
@@ -195,36 +218,36 @@ else:
 
     if st.session_state.ultimo_tiro: st.info(f"🎲 Risultato del Dado: **{st.session_state.ultimo_tiro}**")
 
+    # Visualizzazione Messaggi
     for msg in st.session_state.messages:
         if "[[INTRODUZIONE]]" not in msg["content"]:
             with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    # Se è appena iniziata la partita, genera l'intro
+    # Trigger Introduzione
     if len(st.session_state.messages) == 1 and "[[INTRODUZIONE]]" in st.session_state.messages[0]["content"]:
         with st.chat_message("assistant"):
-            intro_prompt = f"Sei il DM. Introduci l'inizio dell'avventura per {st.session_state.personaggio['nome']}, {st.session_state.personaggio['razza']} {st.session_state.personaggio['classe']}. Equipaggiamento: {st.session_state.inventario}. Usa il tag [[LUOGO:descrizione]] per lo scenario iniziale."
+            intro_prompt = f"Sei il DM. Introduci l'avventura per {st.session_state.personaggio['nome']}, {st.session_state.personaggio['razza']} {st.session_state.personaggio['classe']}. Equipaggiamento: {st.session_state.inventario}. Usa [[LUOGO:descrizione]]."
             response = model.generate_content(intro_prompt).text
-            # Parsing luogo
             if "[[LUOGO:" in response:
                 loc = response.split("[[LUOGO:")[1].split("]]")[0]
-                genera_img(loc, "Inizio Avventura")
+                genera_img(loc, "Scenario Iniziale")
             clean_intro = re.sub(r'\[\[.*?\]\]', '', response).strip()
             st.markdown(clean_intro)
             st.session_state.messages[0]["content"] = clean_intro
             st.rerun()
 
+    # Chat Input & DM Engine
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         sys_p = f"""DM 5e. PG: {st.session_state.personaggio}. LV: {st.session_state.livello}. 
         Tiro: {st.session_state.ultimo_tiro if st.session_state.ultimo_tiro else 'Nessuno'}.
-        Usa: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[ITEM:nome]], [[DIARIO:testo]].
-        Se l'azione richiede competenza, verifica se il PG ce l'ha ({st.session_state.personaggio['competenze']})."""
+        Tag: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[ITEM:nome]], [[DIARIO:testo]]."""
         
         with st.chat_message("assistant"):
             full_res = model.generate_content(sys_p + "\n" + prompt).text
             
-            # Parsing Avanzato
+            # Parsing dei Tag
             if "[[LUOGO:" in full_res: genera_img(full_res.split("[[LUOGO:")[1].split("]]")[0], "Luogo")
             d_match = re.search(r'\[\[DANNO:(\d+)\]\]', full_res)
             if d_match: st.session_state.hp -= int(d_match.group(1))
@@ -236,6 +259,8 @@ else:
                 check_level_up()
             i_match = re.search(r'\[\[ITEM:(.*?)\]\]', full_res)
             if i_match: st.session_state.inventario.append(i_match.group(1).strip())
+            if "[[DIARIO:" in full_res: 
+                st.session_state.diario += "\n- " + full_res.split("[[DIARIO:")[1].split("]]")[0]
             
             clean_res = re.sub(r'\[\[.*?\]\]', '', full_res).strip()
             st.markdown(clean_res)
