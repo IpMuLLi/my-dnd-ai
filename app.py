@@ -13,7 +13,6 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
-# Modello aggiornato come da script originale
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 1. FUNZIONI TECNICHE (PRESERVATE) ---
@@ -33,7 +32,6 @@ def genera_img(descrizione, tipo):
         return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
     except: return None
 
-# --- NUOVA FUNZIONE: GENERATORE LOOT DINAMICO ---
 def genera_loot(rarita="Comune"):
     tabella = {
         "Comune": ["Pozione di Guarigione", "Pergamena di Dardo Incantato", "Olio per Affilare"],
@@ -45,7 +43,7 @@ def genera_loot(rarita="Comune"):
         st.session_state.inventario.append(scelta)
     return scelta
 
-# --- 2. DATASETS COMPLETI (PRESERVATI & ESPANSI) ---
+# --- 2. DATASETS COMPLETI ---
 SKILL_MAP = {
     "Atletica": "Forza", "Furtività": "Destrezza", "Rapidità di mano": "Destrezza", "Acrobazia": "Destrezza",
     "Arcano": "Intelligenza", "Storia": "Intelligenza", "Indagare": "Intelligenza", "Natura": "Intelligenza", "Religione": "Intelligenza",
@@ -125,10 +123,9 @@ with st.sidebar:
         c1.metric("❤️ HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
         c2.metric("🛡️ CA", st.session_state.ca)
 
-        # --- SEZIONE: NEMICO ---
         if st.session_state.nemico_corrente:
             st.divider()
-            st.subheader("⚔️ In Combattimento")
+            st.subheader("⚔️ Combattimento")
             n = st.session_state.nemico_corrente
             st.warning(f"**{n['nome']}**")
             st.write(f"HP: {n['hp']} | CA: {n['ca']}")
@@ -170,33 +167,52 @@ if st.session_state.game_phase == "creazione":
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
     else:
+        # Visualizzazione statistiche tirate
+        st.write("### Statistiche Risultanti")
+        cols = st.columns(6)
+        for i, (s, v) in enumerate(st.session_state.temp_stats.items()):
+            cols[i].metric(s, f"{v} ({calcola_mod(v):+})")
+
         with st.form("crea_mulli"):
             nome = st.text_input("Nome dell'Eroe")
             razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
             classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
+            
             if st.form_submit_button("Inizia Avventura"):
-                mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
-                hp_hit_die = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
-                hp_max = hp_hit_die[classe] + mod_cos
-                st.session_state.update({
-                    "personaggio": {"nome": nome, "classe": classe, "razza": razza, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[classe], "magie": MAGIE_INIZIALI[classe]},
-                    "hp": hp_max, "hp_max": hp_max, "inventario": EQUIP_AVANZATO[classe], "game_phase": "playing",
-                    "spell_slots_max": 2 if classe in ["Mago", "Chierico"] else 0, "spell_slots_curr": 2 if classe in ["Mago", "Chierico"] else 0
-                })
-                # Trigger per l'introduzione automatica
-                st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
-                st.rerun()
+                if not nome:
+                    st.error("Inserisci un nome!")
+                else:
+                    mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
+                    hp_hit_die = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
+                    hp_max = hp_hit_die[classe] + mod_cos
+                    
+                    st.session_state.update({
+                        "personaggio": {
+                            "nome": nome, "classe": classe, "razza": razza, 
+                            "stats": st.session_state.temp_stats, 
+                            "competenze": COMPETENZE_CLASSE[classe], 
+                            "magie": MAGIE_INIZIALI[classe]
+                        },
+                        "hp": hp_max, "hp_max": hp_max, 
+                        "inventario": EQUIP_AVANZATO[classe], 
+                        "game_phase": "playing",
+                        "spell_slots_max": 2 if classe in ["Mago", "Chierico"] else 0, 
+                        "spell_slots_curr": 2 if classe in ["Mago", "Chierico"] else 0
+                    })
+                    # Messaggio di sistema per triggerare l'intro
+                    st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
+                    st.rerun()
 
 else:
     st.title("🛡️ Cronache del Destino")
     
-    # Check se dobbiamo generare l'introduzione iniziale
+    # TRIGGER INTRODUZIONE
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
-        intro_prompt = (f"Sei il DM di D&D 5e. Presenta l'inizio dell'avventura per un {st.session_state.personaggio['razza']} {st.session_state.personaggio['classe']} "
-                        f"di nome {st.session_state.personaggio['nome']}. Descrivi il luogo iniziale usando [[LUOGO:descrizione]].")
-        with st.spinner("Il Dungeon Master sta preparando la storia..."):
+        p = st.session_state.personaggio
+        intro_prompt = (f"Sei il DM 5e. Presenta l'inizio dell'avventura per {p['nome']}, un {p['razza']} {p['classe']}. "
+                        f"Descrivi la scena iniziale usando il tag [[LUOGO:descrizione della scena]].")
+        with st.spinner("Il DM sta arrivando al tavolo..."):
             res = model.generate_content(intro_prompt).text
-            # Gestione Immagine per Intro
             img = genera_img(res.split("[[LUOGO:")[1].split("]]")[0], "Scena") if "[[LUOGO:" in res else None
             clean_res = re.sub(r'\(.*?\)|\[\[.*?\]\]|DM:', '', res).strip()
             st.session_state.messages[-1] = {"role": "assistant", "content": clean_res, "image_url": img}
@@ -228,22 +244,18 @@ else:
     if prompt := st.chat_input("Cosa fa l'eroe?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # System Prompt arricchito
         sys = (f"Sei il DM 5e. PG: {st.session_state.personaggio}. Ultimo Tiro: {st.session_state.ultimo_tiro}. "
-               f"Abilità disponibili per prove: {list(SKILL_MAP.keys())}. "
-               f"Usa [[NEMICO:nome|hp|ca]] per nuovi mostri. [[DANNO_NEMICO:n]] per ferirli. "
-               f"[[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
+               f"Abilità: {list(SKILL_MAP.keys())}. "
+               f"Tag: [[NEMICO:nome|hp|ca]], [[DANNO_NEMICO:n]], [[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
         
-        with st.spinner("Il DM sta scrivendo..."):
+        with st.spinner("Il DM sta pensando..."):
             res = model.generate_content(sys + "\n" + prompt).text
         
-        # --- PARSING MECCANICHE ---
-        # Gestione Nemico
+        # Parsing
         n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', res)
         if n_m:
             st.session_state.nemico_corrente = {"nome": n_m.group(1), "hp": int(n_m.group(2)), "hp_max": int(n_m.group(2)), "ca": int(n_m.group(3))}
         
-        # Danno al Nemico
         dn_m = re.search(r'\[\[DANNO_NEMICO:(\d+)\]\]', res)
         if dn_m and st.session_state.nemico_corrente:
             st.session_state.nemico_corrente["hp"] -= int(dn_m.group(1))
@@ -251,11 +263,9 @@ else:
                 st.session_state.nemico_corrente = None
                 st.toast("Nemico Sconfitto!")
 
-        # Loot automatico
         l_m = re.search(r'\[\[LOOT:(.*?)\]\]', res)
         if l_m: genera_loot(l_m.group(1))
 
-        # Meccaniche standard
         xp_m = re.search(r'\[\[XP:(\d+)\]\]', res)
         if xp_m: st.session_state.xp += int(xp_m.group(1))
         o_m = re.search(r'\[\[ORO:(-?\d+)\]\]', res)
@@ -263,11 +273,9 @@ else:
         d_m = re.search(r'\[\[DANNO:(\d+)\]\]', res)
         if d_m: st.session_state.hp = max(0, st.session_state.hp - int(d_m.group(1)))
 
-        # Generazione Immagine e Pulizia
         clean = re.sub(r'\(.*?\)|\[\[.*?\]\]|DM:', '', res).strip()
         img = genera_img(res.split("[[LUOGO:")[1].split("]]")[0], "Scena") if "[[LUOGO:" in res else None
         
         st.session_state.messages.append({"role": "assistant", "content": clean, "image_url": img})
         st.session_state.ultimo_tiro = None
         st.rerun()
-        
