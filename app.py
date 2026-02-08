@@ -6,83 +6,132 @@ import random
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
-# --- FUNZIONE PER CARICARE LA STORIA ---
-def carica_storia(file_caricato):
-    if file_caricato is not None:
-        stringio = file_caricato.getvalue().decode("utf-8")
-        linee = stringio.split("\n\n")
-        nuovi_messaggi = []
-        for linea in linee:
-            if ":" in linea:
-                ruolo, contenuto = linea.split(":", 1)
-                nuovi_messaggi.append({"role": ruolo.lower().strip(), "content": contenuto.strip()})
-        st.session_state.messages = nuovi_messaggi
-        st.success("Avventura caricata con successo!")
-
-# --- INIZIALIZZAZIONE ---
+# --- INIZIALIZZAZIONE STATO ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "game_phase" not in st.session_state:
+    st.session_state.game_phase = "creazione"
+if "personaggio" not in st.session_state:
+    st.session_state.personaggio = {"nome": "", "classe": "", "razza": ""}
+if "hp_max" not in st.session_state:
+    st.session_state.hp_max = 20
 if "hp" not in st.session_state:
     st.session_state.hp = 20
+if "livello" not in st.session_state:
+    st.session_state.livello = 1
+if "xp" not in st.session_state:
+    st.session_state.xp = 0
+if "oro" not in st.session_state:
+    st.session_state.oro = 50
 if "inventario" not in st.session_state:
-    st.session_state.inventario = ["Spada lunga", "Pozione di cura"]
+    st.session_state.inventario = ["Razioni", "Acciarino"]
+if "ultimo_tiro" not in st.session_state:
+    st.session_state.ultimo_tiro = None
 
-# --- SIDEBAR 2026 ---
+# --- FUNZIONI ---
+def controlla_livello():
+    soglia = st.session_state.livello * 100
+    if st.session_state.xp >= soglia:
+        st.session_state.livello += 1
+        st.session_state.xp -= soglia
+        st.session_state.hp_max += 10
+        st.session_state.hp = st.session_state.hp_max
+        st.toast(f"✨ LEVEL UP! Livello {st.session_state.livello}!", icon="⚔️")
+
+def genera_immagine(descrizione):
+    st.image(f"https://placehold.co/600x400?text={descrizione.replace(' ', '+')}", caption="Visuale dell'Eroe")
+
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🧝 Scheda Eroe")
-    st.metric("Punti Vita", f"{st.session_state.hp} / 20")
-    st.progress(max(0, st.session_state.hp / 20))
-    
-    st.subheader("🎒 Zaino")
-    st.write(", ".join(st.session_state.inventario))
-    
-    if st.button("🎲 Tira d20", use_container_width=True):
-        st.session_state.ultimo_tiro = random.randint(1, 20)
-        st.toast(f"Hai ottenuto un {st.session_state.ultimo_tiro}!")
-
-    st.divider()
-    
-    # GESTIONE SALVATAGGI (MEMORIA)
-    st.subheader("💾 Memoria Storica")
-    
-    # Tasto Scarica
-    full_history = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
-    st.download_button("Scarica Salvataggio", full_history, file_name="salvataggio_dnd.txt")
-    
-    # Caricamento File
-    file_da_caricare = st.file_uploader("Carica un'avventura", type=["txt"])
-    if st.button("Conferma Caricamento"):
-        carica_storia(file_da_caricare)
-
-# --- LOGICA CHAT ---
-st.title("🧙‍♂️ DM Gemini 2.5 Flash Lite")
-
-if not st.session_state.messages:
-    intro = model.generate_content("Sei un DM. Inizia l'avventura e chiedimi chi sono.")
-    st.session_state.messages.append({"role": "assistant", "content": intro.text})
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-if prompt := st.chat_input("Cosa fai?"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    system_prompt = f"HP: {st.session_state.hp}, DADO: {st.session_state.get('ultimo_tiro', 'N/A')}. Se subisco danni scrivi [[DANNO:X]]."
-    
-    with st.chat_message("assistant"):
-        response = model.generate_content(system_prompt + "\n" + prompt)
-        output = response.text
+    if st.session_state.game_phase != "creazione":
+        st.subheader(f"{st.session_state.personaggio['nome']} (Lv. {st.session_state.livello})")
         
-        if "[[DANNO:" in output:
-            try:
-                danno = int(output.split("[[DANNO:")[1].split("]]")[0])
-                st.session_state.hp -= danno
-            except: pass
-
-        st.markdown(output)
-        st.session_state.messages.append({"role": "assistant", "content": output})
-        st.session_state.ultimo_tiro = None
+        # Gestione Vita e Morte
+        if st.session_state.hp <= 0:
+            st.error("💀 SEI MORTO")
+            if st.button("Resuscita (Costo: 50 Oro)"):
+                if st.session_state.oro >= 50:
+                    st.session_state.oro -= 50
+                    st.session_state.hp = st.session_state.hp_max // 2
+                    st.rerun()
+        else:
+            st.metric("Punti Vita", f"{st.session_state.hp} / {st.session_state.hp_max}")
+            st.progress(max(0.0, min(1.0, st.session_state.hp / st.session_state.hp_max)))
         
+        # Progresso XP
+        prossimo = st.session_state.livello * 100
+        st.write(f"XP: {st.session_state.xp} / {prossimo}")
+        st.progress(st.session_state.xp / prossimo)
+        
+        st.metric("💰 Oro", f"{st.session_state.oro} gp")
+        
+        st.subheader("🎒 Zaino")
+        st.write(", ".join(st.session_state.inventario))
+        
+        st.divider()
+        if st.button("🎲 Tira d20", use_container_width=True, disabled=st.session_state.hp <= 0):
+            st.session_state.ultimo_tiro = random.randint(1, 20)
+            st.toast(f"Hai ottenuto un {st.session_state.ultimo_tiro}!")
+
+    st.subheader("💾 Salvataggio")
+    st.download_button("Esporta Storia", 
+                       "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages]), 
+                       file_name="campagna_dnd.txt")
+
+# --- LOGICA DI GIOCO ---
+st.title("🧙‍♂️ D&D Engine Professional 2026")
+
+if st.session_state.game_phase == "creazione":
+    st.subheader("Creazione dell'Eroe")
+    with st.form("char_form"):
+        nome = st.text_input("Nome")
+        razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling"])
+        classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Chierico"])
+        if st.form_submit_button("Inizia l'Avventura") and nome:
+            st.session_state.personaggio = {"nome": nome, "razza": razza, "classe": classe}
+            st.session_state.game_phase = "playing"
+            st.rerun()
+
+elif st.session_state.hp <= 0:
+    st.warning("La tua avventura si è interrotta. Resuscita dalla scheda eroe o ricarica la pagina.")
+
+else:
+    if not st.session_state.messages:
+        p = st.session_state.personaggio
+        intro = model.generate_content(f"DM mode. Inizia avventura per {p['nome']}, {p['razza']} {p['classe']}. [[IMMAGINE:scena iniziale]]")
+        st.session_state.messages.append({"role": "assistant", "content": intro.text})
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Cosa fai?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+
+        sys_prompt = f"""
+        GIOCATORE: {st.session_state.personaggio} | HP: {st.session_state.hp}/{st.session_state.hp_max}
+        ORO: {st.session_state.oro} | TIRO DADO: {st.session_state.ultimo_tiro}
+        
+        REGOLE:
+        1. Se il TIRO DADO è presente, usalo per determinare il successo. Se non c'è e l'azione è difficile, chiedi al giocatore di tirare il dado.
+        2. Usa i tag: [[DANNO:X]], [[CURA:X]], [[ORO:X]], [[XP:X]], [[PRENDI:Oggetto]], [[IMMAGINE:descrizione]].
+        3. Se HP <= 0, descrivi la caduta dell'eroe.
+        """
+        
+        with st.chat_message("assistant"):
+            response = model.generate_content(sys_prompt + "\n" + prompt)
+            out = response.text
+            
+            # Parsing integrato
+            if "[[IMMAGINE:" in out: genera_immagine(out.split("[[IMMAGINE:")[1].split("]]")[0])
+            if "[[DANNO:" in out: st.session_state.hp -= int(out.split("[[DANNO:")[1].split("]]")[0])
+            if "[[XP:" in out: st.session_state.xp += int(out.split("[[XP:")[1].split("]]")[0])
+            if "[[ORO:" in out: st.session_state.oro += int(out.split("[[ORO:")[1].split("]]")[0])
+            if "[[PRENDI:" in out: st.session_state.inventario.append(out.split("[[PRENDI:")[1].split("]]")[0])
+
+            controlla_livello()
+            st.markdown(out)
+            st.session_state.messages.append({"role": "assistant", "content": out})
+            st.session_state.ultimo_tiro = None # Reset dado dopo l'uso
+            st.rerun()
