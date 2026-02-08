@@ -14,9 +14,10 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
+# Configurazione del modello di punta 2026
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
-# --- 1. FUNZIONI TECNICHE ---
+# --- 1. FUNZIONI TECNICHE (PRESERVATE) ---
 def tira_statistica():
     dadi = [random.randint(1, 6) for _ in range(4)]
     dadi.sort()
@@ -37,7 +38,7 @@ def genera_img(descrizione, tipo):
         return url
     except: return None
 
-# --- 2. LOGICA XP & LIVELLO ---
+# --- 2. LOGICA XP & LIVELLO (PRESERVATA) ---
 SOGLIE_XP = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 DADI_VITA = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
 COMPETENZE = {
@@ -58,6 +59,7 @@ def check_level_up():
         if st.session_state.spell_slots_max > 0:
             st.session_state.spell_slots_max += 1
             st.session_state.spell_slots_curr = st.session_state.spell_slots_max
+        st.toast(f"✨ LIVELLO AUMENTATO! Sei ora Livello {st.session_state.livello}", icon="🛡️")
         st.balloons()
         return True
     return False
@@ -80,6 +82,7 @@ with st.sidebar:
         st.subheader(f"{st.session_state.personaggio['nome']} (Lv. {st.session_state.livello})")
         st.metric("Punti Vita ❤️", f"{st.session_state.hp}/{st.session_state.hp_max}")
         st.metric("Oro 🪙", f"{st.session_state.oro}gp")
+        st.caption(f"Esperienza (XP): {st.session_state.xp}")
         
         with st.expander("📊 Statistiche & Abilità"):
             for stat, val in st.session_state.personaggio['stats'].items():
@@ -168,25 +171,68 @@ else:
         st.session_state.spell_slots_curr = st.session_state.spell_slots_max
         st.success("Ripristinato!")
 
+    if st.session_state.ultimo_tiro:
+        st.write(f"🎲 Ultimo Tiro: **{st.session_state.ultimo_tiro}**")
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        sys_p = f"DM. PG: {st.session_state.personaggio}. Tiro: {st.session_state.ultimo_tiro}. HP: {st.session_state.hp}. Tag obbligatori: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[DIARIO:testo]]."
+        
+        # --- PROMPT DI SISTEMA AVANZATO 2026 ---
+        sys_p = f"""Sei un DM di D&D 5e esperto. Anno 2026.
+        Dati PG: {st.session_state.personaggio}. 
+        HP: {st.session_state.hp}/{st.session_state.hp_max}. Oro: {st.session_state.oro}. XP: {st.session_state.xp}.
+        Tiro Corrente: {st.session_state.ultimo_tiro if st.session_state.ultimo_tiro else 'Nessuno - Chiedi un tiro se necessario'}.
+
+        REGOLE DI RISOLUZIONE:
+        1. Se Tiro < 10: Fallimento o complicazione.
+        2. Se Tiro 10-14: Successo con costo o complicazione minore.
+        3. Se Tiro 15-19: Successo pieno.
+        4. Se Tiro 20+: Successo critico epico.
+        5. Se Tiro è 'Nessuno' e l'azione richiede rischio, descrivi l'intento e chiedi un d20.
+        6. DANNO PG: Coerente col livello {st.session_state.livello} (es. 1d6+2). Mai One-Shot ingiustificati.
+
+        TAG OBBLIGATORI (da includere nel testo):
+        [[LUOGO:descrizione]] per nuove scene.
+        [[DANNO:n]] se il PG perde vita.
+        [[ORO:n]] per guadagno/perdita oro.
+        [[XP:n]] per ricompense XP.
+        [[ITEM:nome]] per nuovi oggetti.
+        [[DIARIO:testo]] per la cronaca.
+        """
         
         with st.chat_message("assistant"):
             full_res = model.generate_content(sys_p + "\n" + prompt).text
             
-            # Parsing e pulizia tag
-            if "[[LUOGO:" in full_res: genera_img(full_res.split("[[LUOGO:")[1].split("]]")[0], "Luogo")
-            if "[[DANNO:" in full_res: st.session_state.hp -= int(full_res.split("[[DANNO:")[1].split("]]")[0])
-            if "[[ORO:" in full_res: st.session_state.oro += int(full_res.split("[[ORO:")[1].split("]]")[0])
-            if "[[DIARIO:" in full_res: st.session_state.diario += "\n" + full_res.split("[[DIARIO:")[1].split("]]")[0]
+            # Parsing con Regex per massima precisione
+            if "[[LUOGO:" in full_res: 
+                loc = full_res.split("[[LUOGO:")[1].split("]]")[0]
+                genera_img(loc, "Luogo")
             
-            # Pulisce il testo dai tag prima di mostrarlo
+            danno = re.search(r'\[\[DANNO:(\d+)\]\]', full_res)
+            if danno: st.session_state.hp -= int(danno.group(1))
+            
+            oro = re.search(r'\[\[ORO:(-?\d+)\]\]', full_res)
+            if oro: st.session_state.oro += int(oro.group(1))
+            
+            xp = re.search(r'\[\[XP:(\d+)\]\]', full_res)
+            if xp: 
+                st.session_state.xp += int(xp.group(1))
+                check_level_up()
+                
+            item = re.search(r'\[\[ITEM:(.*?)\]\]', full_res)
+            if item: st.session_state.inventario.append(item.group(1).strip())
+            
+            if "[[DIARIO:" in full_res: 
+                st.session_state.diario += "\n" + full_res.split("[[DIARIO:")[1].split("]]")[0]
+            
             clean_res = re.sub(r'\[\[.*?\]\]', '', full_res).strip()
             st.markdown(clean_res)
             st.session_state.messages.append({"role": "assistant", "content": clean_res})
+            
+            # Reset del tiro dopo la risoluzione
+            st.session_state.ultimo_tiro = None
             st.rerun()
-        
+            
