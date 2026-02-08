@@ -3,7 +3,7 @@ import google.generativeai as genai
 import random
 import json
 import os
-import urllib.parse  # Essenziale per correggere il problema delle immagini
+import urllib.parse
 
 # --- CONFIGURAZIONE CORE ---
 st.set_page_config(page_title="D&D Legend Engine 2026", layout="centered", initial_sidebar_state="collapsed")
@@ -24,12 +24,12 @@ def calcola_mod(punteggio):
 
 def genera_img(descrizione, tipo):
     seed = random.randint(1, 99999)
-    # Creiamo un prompt descrittivo pulito
-    prompt_base = f"Dungeons and Dragons high fantasy style, {tipo}: {descrizione}, detailed digital art, 8k"
-    # TRUCCO TECNICO: Encoding dell'URL per evitare simboli strani o rotture
+    # Prompt ottimizzato per alta qualità
+    prompt_base = f"Dungeons and Dragons high fantasy, {tipo}: {descrizione}, cinematic lighting, detailed digital art, 8k"
     prompt_encoded = urllib.parse.quote(prompt_base)
     
-    url = f"https://pollinations.ai/p/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true"
+    # NUOVO ENDPOINT FUNZIONANTE (API DIRETTA)
+    url = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
     
     img_data = {"url": url, "caption": f"{tipo}: {descrizione[:30]}..."}
     st.session_state.current_image = img_data
@@ -56,7 +56,7 @@ def check_level_up():
         return True
     return False
 
-# --- 3. INIZIALIZZAZIONE STATO ---
+# --- 3. INIZIALIZZAZIONE ---
 if "messages" not in st.session_state:
     st.session_state.update({
         "messages": [], "game_phase": "creazione",
@@ -67,7 +67,7 @@ if "messages" not in st.session_state:
         "ultimo_tiro": None
     })
 
-# --- 4. SIDEBAR (SCHEDA EROE) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.title("🧝 Scheda Eroe")
     if st.session_state.personaggio.get("nome"):
@@ -83,11 +83,11 @@ with st.sidebar:
         st.metric("Punti Vita", f"{st.session_state.hp}/{st.session_state.hp_max}")
         st.metric("Oro", f"{st.session_state.oro}g")
         
-        with st.expander("📊 Caratteristiche"):
+        with st.expander("📊 Statistiche"):
             for stat, val in p['stats'].items():
                 st.write(f"**{stat}**: {val} ({calcola_mod(val):+})")
 
-        with st.expander("🖼️ Galleria Immagini"):
+        with st.expander("🖼️ Galleria Storica"):
             for img in reversed(st.session_state.gallery):
                 st.image(img["url"], caption=img["caption"])
 
@@ -99,26 +99,25 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 5. FLUSSO DI GIOCO ---
+# --- 5. LOGICA DI GIOCO ---
 st.title("⚔️ D&D Legend Engine 2026")
 
 if st.session_state.game_phase == "creazione" and not st.session_state.personaggio.get("nome"):
-    st.subheader("Benvenuto, viandante")
+    st.subheader("Benvenuto, Viandante")
     
-    up_file = st.file_uploader("📂 Carica salvataggio .json dal telefono", type="json")
+    up_file = st.file_uploader("📂 Carica salvataggio .json", type="json")
     if up_file:
         data = json.load(up_file)
         for k, v in data.items(): st.session_state[k] = v
-        st.success("Avventura ripristinata!")
+        st.success("Avventura caricata!")
         st.rerun()
     
     st.divider()
-    with st.form("creazione_nuova"):
-        st.write("Oppure crea un nuovo eroe:")
+    with st.form("creazione"):
         nome = st.text_input("Nome dell'Eroe")
         razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
         classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
-        if st.form_submit_button("Inizia Avventura") and nome:
+        if st.form_submit_button("Crea Personaggio") and nome:
             setup = {"Guerriero": (12,0,["Spada"]), "Mago": (6,3,["Bastone"]), "Ladro": (8,0,["Pugnali"]), "Ranger": (10,2,["Arco"]), "Chierico": (8,3,["Mazza"])}
             hp_b, slots, inv = setup[classe]
             stats = {k: tira_statistica() for k in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
@@ -133,37 +132,33 @@ if st.session_state.game_phase == "creazione" and not st.session_state.personagg
             st.rerun()
 
 else:
-    # 1. Visualizzazione Immagine Corrente (Corretta)
+    # 1. Immagine Corrente con link di emergenza
     if st.session_state.current_image:
-        st.image(st.session_state.current_image["url"], use_container_width=True)
+        url = st.session_state.current_image["url"]
+        st.image(url, use_container_width=True)
+        st.markdown(f'<p style="text-align:center;"><a href="{url}" target="_blank">🔗 Apri immagine originale</a></p>', unsafe_allow_html=True)
     
-    # 2. Pannello Azioni Rapide
+    # 2. Azioni Rapide
     st.write("### Azioni Rapide")
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("🎲 d20"):
         st.session_state.ultimo_tiro = random.randint(1, 20)
-        st.toast(f"Tiro d20: {st.session_state.ultimo_tiro}")
-    
+        st.toast(f"Tiro: {st.session_state.ultimo_tiro}")
     if c2.button("🗡️ Attacco"):
         tiro = random.randint(1, 20)
         mod = calcola_mod(st.session_state.personaggio["stats"].get("Forza", 10))
         st.session_state.ultimo_tiro = tiro + mod
-        st.toast(f"Attacco: {tiro} + {mod} = {st.session_state.ultimo_tiro}")
-        
+        st.toast(f"Attacco: {tiro}+{mod}={st.session_state.ultimo_tiro}")
     if c3.button("✨ Magia"):
         if st.session_state.spell_slots_curr > 0:
             st.session_state.spell_slots_curr -= 1
-            tiro = random.randint(1, 20)
-            mod = calcola_mod(st.session_state.personaggio["stats"].get("Intelligenza", 10))
-            st.session_state.ultimo_tiro = tiro + mod
-            st.toast(f"Magia! Risultato: {st.session_state.ultimo_tiro}")
-        else:
-            st.error("Slot esauriti!")
-
+            st.session_state.ultimo_tiro = random.randint(1, 20) + calcola_mod(st.session_state.personaggio["stats"].get("Intelligenza", 10))
+            st.toast(f"Slot: {st.session_state.spell_slots_curr}")
+        else: st.error("Slot esauriti!")
     if c4.button("⛺ Riposo"):
         st.session_state.hp = st.session_state.hp_max
         st.session_state.spell_slots_curr = st.session_state.spell_slots_max
-        st.success("Riposo completato!")
+        st.success("Ripristinato!")
 
     st.divider()
 
@@ -175,16 +170,13 @@ else:
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         sys_p = f"""Sei un DM di D&D. PG: {st.session_state.personaggio}. HP: {st.session_state.hp}/{st.session_state.hp_max}.
-        Usa SEMPRE questi tag:
-        - [[LUOGO:desc]], [[MOSTRO:desc]], [[OGGETTO:desc]]
-        - [[DANNO:n]], [[ORO:n]], [[XP:n]], [[DIARIO:testo]]
-        Usa il tiro dado ({st.session_state.ultimo_tiro}) se presente."""
+        Tag: [[LUOGO:desc]], [[MOSTRO:desc]], [[OGGETTO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[DIARIO:testo]].
+        Tiro dado attuale: {st.session_state.ultimo_tiro}."""
 
         with st.chat_message("assistant"):
             full_history = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-5:]])
             response = model.generate_content(sys_p + "\n" + full_history).text
             
-            # Parsing Tag
             tags = {"[[LUOGO:": "Luogo", "[[MOSTRO:": "Mostro", "[[OGGETTO:": "Oggetto"}
             for tag, label in tags.items():
                 if tag in response: genera_img(response.split(tag)[1].split("]]")[0], label)
@@ -195,7 +187,7 @@ else:
             if "[[ORO:" in response: st.session_state.oro += int(response.split("[[ORO:")[1].split("]]")[0])
             if "[[XP:" in response: 
                 st.session_state.xp += int(response.split("[[XP:")[1].split("]]")[0])
-                if check_level_up(): st.toast("✨ LIVELLO AUMENTATO!")
+                check_level_up()
             
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
