@@ -17,14 +17,17 @@ model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 1. FUNZIONI TECNICHE (PRESERVATE) ---
 def tira_statistica():
+    """Metodo classico 4d6 (scarta il minore)."""
     dadi = [random.randint(1, 6) for _ in range(4)]
     dadi.sort()
     return sum(dadi[1:])
 
 def calcola_mod(punteggio):
+    """Calcola il modificatore di caratteristica D&D 5e: (Punteggio - 10) // 2."""
     return (punteggio - 10) // 2
 
 def genera_img(descrizione, tipo):
+    """Genera un'immagine tramite Pollinations AI con seed casuale."""
     try:
         seed = random.randint(1, 99999)
         prompt_base = f"Dungeons and Dragons realistic high fantasy, {tipo}: {descrizione}, cinematic lighting, 8k, masterpiece, no text"
@@ -32,18 +35,19 @@ def genera_img(descrizione, tipo):
         return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
     except: return None
 
-# --- NUOVA FUNZIONE: GENERATORE LOOT DINAMICO ---
+# --- FUNZIONE: GENERATORE LOOT DINAMICO ---
 def genera_loot(rarita="Comune"):
     tabella = {
-        "Comune": ["Pozione di Guarigione", "Pergamena di Dardo Incantato", "Olio per Affilare"],
-        "Non Comune": ["Spada +1", "Anello di Protezione", "Mantello del Saltimpalo"],
-        "Raro": ["Armatura di Piastre +1", "Bacchetta delle Palle di Fuoco", "Pozione di Forza del Gigante"]
+        "Comune": ["Pozione di Guarigione", "Pergamena di Dardo Incantato", "Olio per Affilare", "Razioni da viaggio (x5)"],
+        "Non Comune": ["Spada +1", "Anello di Protezione", "Mantello del Saltimpalo", "Stivali del Piede Lesto"],
+        "Raro": ["Armatura di Piastre +1", "Bacchetta delle Palle di Fuoco", "Pozione di Forza del Gigante", "Anello della Rigenerazione"]
     }
     scelta = random.choice(tabella.get(rarita, tabella["Comune"]))
-    st.session_state.inventario.append(scelta)
+    if scelta not in st.session_state.inventario:
+        st.session_state.inventario.append(scelta)
     return scelta
 
-# --- 2. DATASETS COMPLETI (PRESERVATI) ---
+# --- 2. DATASETS COMPLETI (COERENZA 5E) ---
 SKILL_MAP = {
     "Atletica": "Forza", "Furtività": "Destrezza", "Rapidità di mano": "Destrezza",
     "Arcano": "Intelligenza", "Storia": "Intelligenza", "Indagare": "Intelligenza",
@@ -84,9 +88,10 @@ if "messages" not in st.session_state:
         "hp": 20, "hp_max": 20, "oro": 10, "xp": 0, "livello": 1, "bonus_competenza": 2,
         "inventario": [], "spell_slots_max": 0, "spell_slots_curr": 0,
         "ultimo_tiro": None, "temp_stats": {}, "ca": 10, "event_log": [],
-        "nemico_corrente": None # Stato per il Bestiario Interattivo
+        "nemico_corrente": None
     })
 
+# --- LOGICA MECCANICA: CA E LIVELLO ---
 def aggiorna_ca():
     mod_des = calcola_mod(st.session_state.personaggio['stats'].get('Destrezza', 10))
     inv = st.session_state.inventario
@@ -100,6 +105,8 @@ def check_level_up():
     prossimo_liv = XP_LEVELS.get(st.session_state.livello + 1, 999999)
     if st.session_state.xp >= prossimo_liv:
         st.session_state.livello += 1
+        # Bonus competenza aumenta al livello 5
+        st.session_state.bonus_competenza = 3 if st.session_state.livello >= 5 else 2
         mod_cos = calcola_mod(st.session_state.personaggio['stats']['Costituzione'])
         dado_vita = 10 if st.session_state.personaggio['classe'] == "Guerriero" else 8
         incremento_hp = random.randint(1, dado_vita) + mod_cos
@@ -124,32 +131,39 @@ with st.sidebar:
         c1.metric("❤️ HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
         c2.metric("🛡️ CA", st.session_state.ca)
 
-        # --- SEZIONE: BESTIARIO INTERATTIVO ---
         if st.session_state.nemico_corrente:
             st.divider()
             st.subheader("⚔️ Combattimento")
             n = st.session_state.nemico_corrente
             st.warning(f"**{n['nome']}**")
-            st.write(f"HP: {n['hp']} | CA: {n['ca']}")
+            st.write(f"HP: {n['hp']} / {n['hp_max']} | CA: {n['ca']}")
             st.progress(max(0.0, min(1.0, n['hp'] / n['hp_max'])))
-            if st.button("Sconfiggi Nemico"): 
-                st.session_state.nemico_corrente = None
-                st.rerun()
+            if st.button("Forza Sconfitta"): st.session_state.nemico_corrente = None; st.rerun()
 
         with st.expander("🎒 Inventario & Oro"):
             st.write(f"💰 Oro: **{st.session_state.oro}**")
             for item in st.session_state.inventario: st.write(f"- {item}")
 
-        with st.expander("🪄 Magie & Stat"):
+        with st.expander("📊 Statistiche & Magie"):
             for s, v in p['stats'].items(): st.write(f"**{s}**: {v} ({calcola_mod(v):+})")
             st.divider()
             for magia in p.get('magie', []): st.write(f"✨ {magia}")
 
-        with st.expander("🖼️ Galleria"):
+        with st.expander("📖 Grimorio del Destino"):
+            # Riassunto automatico degli ultimi 5 input dell'utente
+            history = [m["content"] for m in st.session_state.messages if m["role"] == "user"]
+            if history:
+                st.caption("Ultime gesta:")
+                for h in history[-5:]: st.write(f"• {h}")
+            else: st.write("Storia ancora da scrivere.")
+
+        with st.expander("🖼️ Galleria dei Ricordi"):
             immagini = [m["image_url"] for m in st.session_state.messages if "image_url" in m and m["image_url"]]
-            for img_url in immagini[-3:]: st.image(img_url)
+            for img_url in immagini: st.image(img_url)
 
         st.divider()
+        save_data = json.dumps({k: v for k, v in st.session_state.items() if k != "GEMINI_API_KEY"}, indent=2)
+        st.download_button("💾 Esporta Salvataggio", save_data, file_name=f"{p['nome']}_save.json")
         if st.button("🗑️ Reset Totale"):
             st.session_state.clear()
             st.rerun()
@@ -158,26 +172,45 @@ with st.sidebar:
 if st.session_state.game_phase == "creazione":
     st.title("🎲 Officina di Mulli")
     
+    # REINTEGRATO: Caricamento Salvataggio
+    with st.expander("📂 Carica Personaggio Esistente"):
+        up_file = st.file_uploader("Trascina qui il file .json", type="json")
+        if up_file:
+            data = json.load(up_file)
+            for k, v in data.items(): st.session_state[k] = v
+            st.success("Salvataggio caricato con successo!")
+            st.rerun()
+
     if not st.session_state.temp_stats:
         if st.button("🎲 Tira Caratteristiche"):
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
     else:
+        st.write("I tuoi tiri (4d6 drop lowest):")
+        cols = st.columns(6)
+        for i, (s, v) in enumerate(st.session_state.temp_stats.items()): cols[i].metric(s, v)
+        
+        if st.button("🔄 Reroll"):
+            st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
+            st.rerun()
+
         with st.form("crea_mulli"):
             nome = st.text_input("Nome dell'Eroe")
             razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
             classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
             if st.form_submit_button("Inizia Avventura"):
-                mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
-                hp_hit_die = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
-                hp_max = hp_hit_die[classe] + mod_cos
-                st.session_state.update({
-                    "personaggio": {"nome": nome, "classe": classe, "razza": razza, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[classe], "magie": MAGIE_INIZIALI[classe]},
-                    "hp": hp_max, "hp_max": hp_max, "inventario": EQUIP_AVANZATO[classe], "game_phase": "playing",
-                    "spell_slots_max": 2 if classe in ["Mago", "Chierico"] else 0, "spell_slots_curr": 2 if classe in ["Mago", "Chierico"] else 0
-                })
-                st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
-                st.rerun()
+                if nome:
+                    mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
+                    hp_hit_die = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
+                    hp_max = hp_hit_die[classe] + mod_cos
+                    st.session_state.update({
+                        "personaggio": {"nome": nome, "classe": classe, "razza": razza, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[classe], "magie": MAGIE_INIZIALI[classe]},
+                        "hp": hp_max, "hp_max": hp_max, "inventario": EQUIP_AVANZATO[classe], "game_phase": "playing",
+                        "spell_slots_max": 2 if classe in ["Mago", "Chierico"] else 0, "spell_slots_curr": 2 if classe in ["Mago", "Chierico"] else 0
+                    })
+                    aggiorna_ca()
+                    st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
+                    st.rerun()
 
 else:
     st.title("🛡️ Cronache del Destino")
@@ -207,45 +240,34 @@ else:
     # Loop AI
     if prompt := st.chat_input("Cosa fa l'eroe?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        # System Prompt con istruzioni per i nuovi tag
         sys = (f"Sei il DM 5e. PG: {st.session_state.personaggio}. Tiro: {st.session_state.ultimo_tiro}. "
-               f"Se appare un mostro usa: [[NEMICO:nome|hp|ca]]. Se il mostro subisce danni: [[DANNO_NEMICO:n]]. "
-               f"Se il PG riceve oggetti: [[LOOT:rarità]]. Altri: [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
-        
+               f"Usa tag: [[NEMICO:nome|hp|ca]], [[DANNO_NEMICO:n]], [[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
         res = model.generate_content(sys + "\n" + prompt).text
         
-        # --- PARSING MECCANICHE EVOLUTE ---
-        # Gestione Nemico
+        # Parsing
         n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', res)
-        if n_m:
-            st.session_state.nemico_corrente = {"nome": n_m.group(1), "hp": int(n_m.group(2)), "hp_max": int(n_m.group(2)), "ca": int(n_m.group(3))}
+        if n_m: st.session_state.nemico_corrente = {"nome": n_m.group(1), "hp": int(n_m.group(2)), "hp_max": int(n_m.group(2)), "ca": int(n_m.group(3))}
         
-        # Danno al Nemico
         dn_m = re.search(r'\[\[DANNO_NEMICO:(\d+)\]\]', res)
         if dn_m and st.session_state.nemico_corrente:
             st.session_state.nemico_corrente["hp"] -= int(dn_m.group(1))
-            if st.session_state.nemico_corrente["hp"] <= 0:
-                st.session_state.nemico_corrente = None
-                st.toast("Nemico Sconfitto!")
+            if st.session_state.nemico_corrente["hp"] <= 0: st.session_state.nemico_corrente = None; st.toast("Nemico Abbattuto!")
 
-        # Loot automatico
         l_m = re.search(r'\[\[LOOT:(.*?)\]\]', res)
         if l_m: genera_loot(l_m.group(1))
 
-        # Standard (XP, Oro, Danni PG)
         xp_m = re.search(r'\[\[XP:(\d+)\]\]', res)
         if xp_m: st.session_state.xp += int(xp_m.group(1))
+        
         o_m = re.search(r'\[\[ORO:(-?\d+)\]\]', res)
         if o_m: st.session_state.oro = max(0, st.session_state.oro + int(o_m.group(1)))
+        
         d_m = re.search(r'\[\[DANNO:(\d+)\]\]', res)
         if d_m: st.session_state.hp = max(0, st.session_state.hp - int(d_m.group(1)))
 
-        # Generazione Immagine e Pulizia
         clean = re.sub(r'\(.*?\)|\[\[.*?\]\]|DM:', '', res).strip()
         img = genera_img(res.split("[[LUOGO:")[1].split("]]")[0], "Scena") if "[[LUOGO:" in res else None
         
         st.session_state.messages.append({"role": "assistant", "content": clean, "image_url": img})
         st.session_state.ultimo_tiro = None
         st.rerun()
-        
