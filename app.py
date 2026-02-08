@@ -3,6 +3,7 @@ import google.generativeai as genai
 import random
 import json
 import os
+import urllib.parse  # Essenziale per correggere il problema delle immagini
 
 # --- CONFIGURAZIONE CORE ---
 st.set_page_config(page_title="D&D Legend Engine 2026", layout="centered", initial_sidebar_state="collapsed")
@@ -23,8 +24,13 @@ def calcola_mod(punteggio):
 
 def genera_img(descrizione, tipo):
     seed = random.randint(1, 99999)
-    prompt_img = f"Dungeons and Dragons style, {tipo}: {descrizione}, high fantasy, detailed, digital art"
-    url = f"https://pollinations.ai/p/{prompt_img.replace(' ', '_')}?width=1024&height=1024&seed={seed}&nologo=true"
+    # Creiamo un prompt descrittivo pulito
+    prompt_base = f"Dungeons and Dragons high fantasy style, {tipo}: {descrizione}, detailed digital art, 8k"
+    # TRUCCO TECNICO: Encoding dell'URL per evitare simboli strani o rotture
+    prompt_encoded = urllib.parse.quote(prompt_base)
+    
+    url = f"https://pollinations.ai/p/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true"
+    
     img_data = {"url": url, "caption": f"{tipo}: {descrizione[:30]}..."}
     st.session_state.current_image = img_data
     st.session_state.gallery.append(img_data)
@@ -68,7 +74,6 @@ with st.sidebar:
         p = st.session_state.personaggio
         st.subheader(f"{p['nome']} (Lv. {st.session_state.livello})")
         
-        # XP Progress
         prossima = SOGLIE_XP.get(st.session_state.livello + 1, "MAX")
         if prossima != "MAX":
             prog = (st.session_state.xp - SOGLIE_XP[st.session_state.livello]) / (prossima - SOGLIE_XP[st.session_state.livello])
@@ -82,7 +87,7 @@ with st.sidebar:
             for stat, val in p['stats'].items():
                 st.write(f"**{stat}**: {val} ({calcola_mod(val):+})")
 
-        with st.expander("🖼️ Galleria"):
+        with st.expander("🖼️ Galleria Immagini"):
             for img in reversed(st.session_state.gallery):
                 st.image(img["url"], caption=img["caption"])
 
@@ -100,8 +105,7 @@ st.title("⚔️ D&D Legend Engine 2026")
 if st.session_state.game_phase == "creazione" and not st.session_state.personaggio.get("nome"):
     st.subheader("Benvenuto, viandante")
     
-    # Caricamento prioritario da Smartphone
-    up_file = st.file_uploader("📂 Carica salvataggio .json", type="json")
+    up_file = st.file_uploader("📂 Carica salvataggio .json dal telefono", type="json")
     if up_file:
         data = json.load(up_file)
         for k, v in data.items(): st.session_state[k] = v
@@ -129,34 +133,34 @@ if st.session_state.game_phase == "creazione" and not st.session_state.personagg
             st.rerun()
 
 else:
-    # 1. Visualizzazione Immagine Corrente
+    # 1. Visualizzazione Immagine Corrente (Corretta)
     if st.session_state.current_image:
         st.image(st.session_state.current_image["url"], use_container_width=True)
     
     # 2. Pannello Azioni Rapide
     st.write("### Azioni Rapide")
     c1, c2, c3, c4 = st.columns(4)
-    if c1.button("🎲 d20", help="Tiro d20 puro"):
+    if c1.button("🎲 d20"):
         st.session_state.ultimo_tiro = random.randint(1, 20)
         st.toast(f"Tiro d20: {st.session_state.ultimo_tiro}")
     
-    if c2.button("🗡️ Attacco", help="Tiro d20 + Forza"):
+    if c2.button("🗡️ Attacco"):
         tiro = random.randint(1, 20)
         mod = calcola_mod(st.session_state.personaggio["stats"].get("Forza", 10))
         st.session_state.ultimo_tiro = tiro + mod
         st.toast(f"Attacco: {tiro} + {mod} = {st.session_state.ultimo_tiro}")
         
-    if c3.button("✨ Magia", help="Usa uno slot incantesimo"):
+    if c3.button("✨ Magia"):
         if st.session_state.spell_slots_curr > 0:
             st.session_state.spell_slots_curr -= 1
             tiro = random.randint(1, 20)
             mod = calcola_mod(st.session_state.personaggio["stats"].get("Intelligenza", 10))
             st.session_state.ultimo_tiro = tiro + mod
-            st.toast(f"Magia! Slot: {st.session_state.spell_slots_curr}. Risultato: {st.session_state.ultimo_tiro}")
+            st.toast(f"Magia! Risultato: {st.session_state.ultimo_tiro}")
         else:
-            st.error("Nessuno slot magia!")
+            st.error("Slot esauriti!")
 
-    if c4.button("⛺ Riposo", help="Ripristina HP e Slot"):
+    if c4.button("⛺ Riposo"):
         st.session_state.hp = st.session_state.hp_max
         st.session_state.spell_slots_curr = st.session_state.spell_slots_max
         st.success("Riposo completato!")
@@ -170,13 +174,11 @@ else:
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        sys_p = f"""Sei un DM esperto. PG: {st.session_state.personaggio}. HP: {st.session_state.hp}/{st.session_state.hp_max}.
-        Usa SEMPRE questi tag per aggiornare lo stato:
-        - [[LUOGO:desc]], [[MOSTRO:desc]], [[OGGETTO:desc]] (per immagini)
-        - [[DANNO:n]] (positivo=danno, negativo=cura)
-        - [[ORO:n]], [[XP:n]] (ricompense)
-        - [[DIARIO:riassunto breve]]
-        Se è presente un tiro dado ({st.session_state.ultimo_tiro}), usalo per determinare il successo."""
+        sys_p = f"""Sei un DM di D&D. PG: {st.session_state.personaggio}. HP: {st.session_state.hp}/{st.session_state.hp_max}.
+        Usa SEMPRE questi tag:
+        - [[LUOGO:desc]], [[MOSTRO:desc]], [[OGGETTO:desc]]
+        - [[DANNO:n]], [[ORO:n]], [[XP:n]], [[DIARIO:testo]]
+        Usa il tiro dado ({st.session_state.ultimo_tiro}) se presente."""
 
         with st.chat_message("assistant"):
             full_history = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-5:]])
@@ -194,11 +196,9 @@ else:
             if "[[XP:" in response: 
                 st.session_state.xp += int(response.split("[[XP:")[1].split("]]")[0])
                 if check_level_up(): st.toast("✨ LIVELLO AUMENTATO!")
-            if "[[DIARIO:" in response: st.session_state.diario = response.split("[[DIARIO:")[1].split("]]")[0]
             
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
-            st.session_state.ultimo_tiro = None # Reset dopo l'uso
+            st.session_state.ultimo_tiro = None
             st.rerun()
             
-        
