@@ -72,14 +72,15 @@ if "messages" not in st.session_state:
 prossimo_liv = XP_LEVELS.get(st.session_state.livello + 1, 999999)
 if st.session_state.xp >= prossimo_liv:
     st.session_state.livello += 1
-    mod_cos = calcola_mod(st.session_state.personaggio['stats']['Costituzione'])
-    incremento_hp = (random.randint(1, 10) if st.session_state.personaggio['classe'] == "Guerriero" else 6) + mod_cos
-    st.session_state.hp_max += max(1, incremento_hp)
-    st.session_state.hp = st.session_state.hp_max
-    if st.session_state.spell_slots_max > 0: st.session_state.spell_slots_max += 1
+    if st.session_state.personaggio.get("stats"):
+        mod_cos = calcola_mod(st.session_state.personaggio['stats']['Costituzione'])
+        incremento_hp = (random.randint(1, 10) if st.session_state.personaggio['classe'] == "Guerriero" else 6) + mod_cos
+        st.session_state.hp_max += max(1, incremento_hp)
+        st.session_state.hp = st.session_state.hp_max
+        if st.session_state.spell_slots_max > 0: st.session_state.spell_slots_max += 1
     st.toast(f"✨ LIVELLO AUMENTATO! Mulli è ora di Livello {st.session_state.livello}!", icon="⚔️")
 
-# --- 4. SIDEBAR (CON BARRA XP) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.title("🧝 Scheda Eroe")
     if st.session_state.personaggio.get("nome"):
@@ -104,13 +105,16 @@ with st.sidebar:
                 bonus = calcola_mod(p['stats'][SKILL_MAP[skill]]) + st.session_state.bonus_competenza
                 st.write(f"{skill}: **{bonus:+}**")
 
+        with st.expander("🎒 Inventario"):
+            for item in st.session_state.inventario: st.write(f"- {item}")
+
         st.divider()
         st.subheader("📖 Guida Difficoltà (CD)")
         st.caption("Facile: 10 | Media: 15 | Difficile: 20")
         
         st.divider()
         save_data = json.dumps({k: v for k, v in st.session_state.items() if k != "GEMINI_API_KEY"}, indent=2)
-        st.download_button("💾 Salva", save_data, file_name=f"{p['nome']}_save.json")
+        st.download_button("💾 Esporta Salvataggio", save_data, file_name=f"{p['nome']}_save.json")
         if st.button("🗑️ Reset"):
             st.session_state.clear()
             st.rerun()
@@ -118,59 +122,95 @@ with st.sidebar:
 # --- 5. LOGICA DI GIOCO ---
 if st.session_state.game_phase == "creazione":
     st.title("🎲 Officina di Mulli")
-    # (Logica creazione identica a prima, preservata)
+    
+    # REINTEGRATO: Caricamento Salvataggio
+    with st.expander("📂 Carica Personaggio Esistente"):
+        up_file = st.file_uploader("Trascina qui il file .json", type="json")
+        if up_file:
+            data = json.load(up_file)
+            for k, v in data.items(): st.session_state[k] = v
+            st.rerun()
+
     if not st.session_state.temp_stats:
-        if st.button("🎲 Tira Statistiche"):
+        if st.button("🎲 Tira Caratteristiche"):
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
     else:
+        st.write("I tuoi tiri:")
         cols = st.columns(6)
         for i, (s, v) in enumerate(st.session_state.temp_stats.items()): cols[i].metric(s, v)
-        with st.form("crea"):
-            nome = st.text_input("Nome")
-            razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano"])
-            classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger"])
-            if st.form_submit_button("Inizia"):
+        
+        if st.button("🔄 Reroll"):
+            st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
+            st.rerun()
+
+        with st.form("crea_mulli"):
+            nome = st.text_input("Nome dell'Eroe")
+            razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
+            classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
+            if st.form_submit_button("Inizia Avventura"):
                 if nome:
+                    mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
+                    mod_des = calcola_mod(st.session_state.temp_stats["Destrezza"])
+                    hp_max = 10 + mod_cos + (10 if classe=="Guerriero" else 8)
+                    ca_base = 10 + mod_des + (6 if classe=="Guerriero" else 2 if classe=="Ladro" else 0)
+                    
                     st.session_state.update({
                         "personaggio": {"nome": nome, "classe": classe, "razza": razza, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[classe]},
-                        "game_phase": "playing", "hp": 20, "hp_max": 20, "ca": 14, "inventario": EQUIP_AVANZATO[classe]
+                        "hp": hp_max, "hp_max": hp_max, "ca": ca_base,
+                        "inventario": EQUIP_AVANZATO[classe], "game_phase": "playing",
+                        "spell_slots_max": 3 if classe in ["Mago", "Chierico"] else 0,
+                        "spell_slots_curr": 3 if classe in ["Mago", "Chierico"] else 0
                     })
                     st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
                     st.rerun()
+
 else:
-    st.title("🛡️ Avventura")
+    st.title("🛡️ Cronache del Destino")
+    
+    # Pulsantiera
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("🎲 d20"): st.session_state.ultimo_tiro = random.randint(1, 20)
-    if c2.button("⚔️ Attacco"): st.session_state.ultimo_tiro = random.randint(1, 20) + 5
-    if c3.button("⛺ Riposo"): 
+    if c2.button("⚔️ Attacco"): 
+        mod = calcola_mod(st.session_state.personaggio['stats']['Forza'])
+        st.session_state.ultimo_tiro = random.randint(1, 20) + mod + st.session_state.bonus_competenza
+    if c3.button("⛺ Riposo"):
         st.session_state.hp = st.session_state.hp_max
-        st.success("HP Ripristinati!")
-    if c4.button("🔍 Percezione"): 
+        st.session_state.spell_slots_curr = st.session_state.spell_slots_max
+        st.success("HP e Slot ripristinati!")
+    if c4.button("🔍 Percezione"):
         mod_sag = calcola_mod(st.session_state.personaggio['stats']['Saggezza'])
         st.session_state.ultimo_tiro = random.randint(1, 20) + mod_sag + st.session_state.bonus_competenza
 
-    if st.session_state.ultimo_tiro: st.info(f"Risultato: **{st.session_state.ultimo_tiro}**")
+    if st.session_state.ultimo_tiro: st.info(f"Ultimo Lancio: **{st.session_state.ultimo_tiro}**")
 
+    # Chat Rendering
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
                 if "image_url" in msg: st.image(msg["image_url"])
 
+    # Gestore Intro
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
-        q = f"Sei il DM. Narra l'inizio per {st.session_state.personaggio['nome']}. Bosco, fuoco, notte. Solo narrazione, niente parentesi. Tag: [[LUOGO:Bosco notturno]]."
+        q = (f"Sei il DM. Narra l'inizio per {st.session_state.personaggio['nome']}. "
+             f"Scenario: Bosco notturno al fuoco. Sii puramente narrativo, niente parentesi o 'DM:'. "
+             f"Concludi con [[LUOGO:Bosco notturno fuoco]].")
         res = model.generate_content(q).text
-        clean = re.sub(r'\(.*?\)|\[\[.*?\]\]|DM:', '', res).strip()
-        st.session_state.messages[-1] = {"role": "assistant", "content": clean, "image_url": genera_img("Campfire forest", "Ambiente")}
+        clean = re.sub(r'\(.*?\)|\[\[.*?\]\]|DM:|Dungeon Master:', '', res).strip()
+        if clean.endswith((" della", " del", " la", " lo")): clean += " radura antica."
+        img = genera_img("Campfire in dark ancient forest", "Ambiente")
+        st.session_state.messages[-1] = {"role": "assistant", "content": clean, "image_url": img}
         st.rerun()
 
-    if prompt := st.chat_input("Cosa fai?"):
+    # Input Standard
+    if prompt := st.chat_input("Cosa fa Mulli?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        sys = f"DM 5e. PG: {st.session_state.personaggio}. Tiro: {st.session_state.ultimo_tiro}. Tag: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]]."
+        sys = (f"Sei il DM 5e. PG: {st.session_state.personaggio}. Tiro: {st.session_state.ultimo_tiro}. "
+               f"Rispondi narrando l'esito. Usa: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]].")
         res = model.generate_content(sys + "\n" + prompt).text
         
-        # Parsing XP e Meccaniche
+        # Parsing Meccaniche
         xp_m = re.search(r'\[\[XP:(\d+)\]\]', res)
         if xp_m: st.session_state.xp += int(xp_m.group(1))
         d_m = re.search(r'\[\[DANNO:(\d+)\]\]', res)
@@ -181,4 +221,4 @@ else:
         st.session_state.messages.append({"role": "assistant", "content": clean, "image_url": img})
         st.session_state.ultimo_tiro = None
         st.rerun()
-                    
+        
