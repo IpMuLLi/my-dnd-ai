@@ -6,114 +6,103 @@ import random
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
-# --- INIZIALIZZAZIONE STATO ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "game_phase" not in st.session_state:
-    st.session_state.game_phase = "creazione"
-if "personaggio" not in st.session_state:
-    st.session_state.personaggio = {"nome": "", "classe": "", "razza": "", "abilita": []}
-if "hp_max" not in st.session_state:
-    st.session_state.hp_max = 20
-if "hp" not in st.session_state:
-    st.session_state.hp = 20
-if "livello" not in st.session_state:
-    st.session_state.livello = 1
-if "xp" not in st.session_state:
-    st.session_state.xp = 0
-if "oro" not in st.session_state:
-    st.session_state.oro = 50
-if "inventario" not in st.session_state:
-    st.session_state.inventario = ["Razioni", "Acciarino"]
-
-# --- DIZIONARIO ABILITÀ ---
-ABILITA_CLASSI = {
-    "Guerriero": ["Secondo Vento", "Stile di Combattimento"],
-    "Mago": ["Recupero Arcano", "Incantesimi di Livello 1"],
-    "Ladro": ["Attacco Furtivo", "Esperto di Serrature"],
-    "Chierico": ["Incanalare Divinità", "Cura Ferite"],
-    "Ranger": ["Nemico Prescelto", "Esploratore Naturale", "Tiro Preciso"]
-}
+# --- INIZIALIZZAZIONE ---
+if "messages" not in st.session_state: st.session_state.messages = []
+if "game_phase" not in st.session_state: st.session_state.game_phase = "creazione"
+# Meccaniche Mostro Attuale
+if "mostro_attuale" not in st.session_state:
+    st.session_state.mostro_attuale = {"nome": None, "hp": 0, "hp_max": 0, "status": []}
 
 # --- FUNZIONI ---
-def controlla_livello():
-    soglia = st.session_state.livello * 100
-    if st.session_state.xp >= soglia:
-        st.session_state.livello += 1
-        st.session_state.xp -= soglia
-        st.session_state.hp_max += 10
-        st.session_state.hp = st.session_state.hp_max
-        st.toast(f"✨ LEVEL UP! Livello {st.session_state.livello}!", icon="⚔️")
+def registra_mostro(nome, hp):
+    st.session_state.mostro_attuale = {
+        "nome": nome,
+        "hp": hp,
+        "hp_max": hp,
+        "status": []
+    }
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🧝 Scheda Eroe")
     if st.session_state.game_phase != "creazione":
-        st.subheader(f"{st.session_state.personaggio['nome']} (Lv. {st.session_state.livello})")
-        st.caption(f"{st.session_state.personaggio['razza']} {st.session_state.personaggio['classe']}")
+        st.metric("Tuo HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
         
-        # HP e XP
-        st.metric("Punti Vita", f"{st.session_state.hp} / {st.session_state.hp_max}")
-        st.progress(max(0.0, min(1.0, st.session_state.hp / st.session_state.hp_max)))
-        st.write(f"XP: {st.session_state.xp} / {st.session_state.livello * 100}")
-        st.progress(st.session_state.xp / (st.session_state.livello * 100))
-        
-        # SEZIONE ABILITÀ SPECIALI
-        st.divider()
-        st.subheader("✨ Abilità Speciali")
-        for abi in st.session_state.personaggio["abilita"]:
-            st.info(abi)
+        # INTERFACCIA COMBATTIMENTO (Appare solo se c'è un mostro)
+        if st.session_state.mostro_attuale["nome"]:
+            st.divider()
+            st.error(f"💢 IN COMBATTIMENTO: {st.session_state.mostro_attuale['nome']}")
+            hp_mostro = st.session_state.mostro_attuale['hp']
+            hp_max_m = st.session_state.mostro_attuale['hp_max']
+            st.progress(max(0.0, hp_mostro / hp_max_m))
+            st.caption(f"HP Mostro: {hp_mostro} / {hp_max_m}")
+            if st.session_state.mostro_attuale["status"]:
+                st.warning(f"Effetti: {', '.join(st.session_state.mostro_attuale['status'])}")
         
         st.divider()
-        st.metric("💰 Oro", f"{st.session_state.oro} gp")
-        st.subheader("🎒 Zaino")
-        st.write(", ".join(st.session_state.inventario))
-        
         if st.button("🎲 Tira d20", use_container_width=True):
             st.session_state.ultimo_tiro = random.randint(1, 20)
             st.toast(f"Hai ottenuto un {st.session_state.ultimo_tiro}!")
 
-    if st.button("🗑️ Reset Totale"):
-        st.session_state.clear()
-        st.rerun()
-
 # --- LOGICA DI GIOCO ---
-st.title("🧙‍♂️ D&D Engine 2026")
+st.title("⚔️ D&D Tactical Engine")
 
 if st.session_state.game_phase == "creazione":
-    st.subheader("Creazione dell'Eroe")
+    # ... (Form creazione precedente) ...
     with st.form("char_form"):
-        nome = st.text_input("Nome")
-        razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
-        classe = st.selectbox("Classe", list(ABILITA_CLASSI.keys()))
-        if st.form_submit_button("Inizia l'Avventura") and nome:
-            st.session_state.personaggio = {
-                "nome": nome, 
-                "razza": razza, 
-                "classe": classe,
-                "abilita": ABILITA_CLASSI[classe]
-            }
+        nome = st.text_input("Nome Eroe")
+        classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Chierico", "Ranger"])
+        if st.form_submit_button("Inizia") and nome:
+            st.session_state.personaggio = {"nome": nome, "classe": classe}
             st.session_state.game_phase = "playing"
             st.rerun()
-
 else:
-    if not st.session_state.messages:
-        p = st.session_state.personaggio
-        intro = model.generate_content(f"Sei il DM. Inizia l'avventura per {p['nome']}, {p['razza']} {p['classe']}. Usa le sue abilità: {p['abilita']}.")
-        st.session_state.messages.append({"role": "assistant", "content": intro.text})
+    # Display Scenario e Chat
+    if st.session_state.current_image:
+        st.image(st.session_state.current_image["url"])
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Cosa fai?"):
+    if prompt := st.chat_input("Descrivi la tua azione (es: Attacco il braccio destro)"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
-
-        sys_prompt = f"GIOCO: {st.session_state.personaggio} | HP: {st.session_state.hp} | DADO: {st.session_state.get('ultimo_tiro', 'N/A')}"
+        
+        # System Prompt Tattico
+        sys_prompt = f"""
+        SEI IL DM. Mostro Attuale: {st.session_state.mostro_attuale}.
+        Tiro Dado Giocatore: {st.session_state.get('ultimo_tiro', 'N/A')}.
+        
+        REGOLE TATTICHE:
+        1. Se il giocatore descrive un attacco mirato (es. al braccio), valuta l'effetto narrativo.
+        2. Se appare un mostro usa: [[NUOVO_MOSTRO:Nome:HP]]
+        3. Se il mostro subisce danni: [[DANNO_MOSTRO:X]]
+        4. Se l'attacco causa un malus (es. braccio rotto): [[STATUS_MOSTRO:descrizione breve]]
+        5. Se il mostro muore (HP=0), descrivi la sua fine e usa [[MORTE_MOSTRO]].
+        """
         
         with st.chat_message("assistant"):
-            response = model.generate_content(sys_prompt + "\n" + prompt)
-            st.markdown(response.text)
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
+            response = model.generate_content(sys_prompt + "\n" + prompt).text
+            
+            # PARSING TATTICO
+            if "[[NUOVO_MOSTRO:" in response:
+                dati = response.split("[[NUOVO_MOSTRO:")[1].split("]]")[0].split(":")
+                registra_mostro(dati[0], int(dati[1]))
+            
+            if "[[DANNO_MOSTRO:" in response:
+                danno = int(response.split("[[DANNO_MOSTRO:")[1].split("]]")[0])
+                st.session_state.mostro_attuale["hp"] -= danno
+            
+            if "[[STATUS_MOSTRO:" in response:
+                effetto = response.split("[[STATUS_MOSTRO:")[1].split("]]")[0]
+                st.session_state.mostro_attuale["status"].append(effetto)
+            
+            if "[[MORTE_MOSTRO]]" in response:
+                st.session_state.mostro_attuale = {"nome": None, "hp": 0, "hp_max": 0, "status": []}
+
+            # ... (Altro parsing DANNO/ORO/XP...)
+
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
             st.session_state.ultimo_tiro = None
             st.rerun()
+            
