@@ -40,7 +40,7 @@ def genera_img(descrizione, tipo):
     st.session_state.gallery.append(img_data)
     return url
 
-# --- 3. SIDEBAR AGGIORNATA ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.title("🧝 Scheda Eroe")
     st.session_state.immersiva = st.toggle("🌌 Modalità Immersiva", st.session_state.immersiva)
@@ -61,7 +61,7 @@ with st.sidebar:
             for m in st.session_state.missioni:
                 st.info(f"📍 {m}")
 
-        # Zaino (FIX: Qui mostriamo tutto chiaramente)
+        # Zaino (FIX: Visualizzazione pulita e completa)
         with st.expander("🎒 Zaino & Equipaggiamento", expanded=True):
             st.write(f"💰 **Oro:** {st.session_state.oro}g")
             if st.session_state.inventario:
@@ -84,7 +84,7 @@ with st.sidebar:
                     st.image(img["url"])
 
         st.divider()
-        # Salvataggio/Caricamento
+        # Salvataggio
         save_data = {k: v for k, v in st.session_state.items() if k not in ["GEMINI_API_KEY"]}
         st.download_button("💾 Salva JSON", json.dumps(save_data), file_name="save.json", use_container_width=True)
         
@@ -93,10 +93,6 @@ with st.sidebar:
             data = json.load(up)
             for k, v in data.items(): st.session_state[k] = v
             st.rerun()
-
-        if st.button("🎲 Tira d20", use_container_width=True):
-            st.session_state.ultimo_tiro = random.randint(1, 20)
-            st.toast(f"Hai fatto {st.session_state.ultimo_tiro}!")
 
     if st.button("🗑️ Reset Totale", use_container_width=True):
         st.session_state.clear()
@@ -109,7 +105,7 @@ if st.session_state.game_phase == "creazione":
         razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling"])
         classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
         if st.form_submit_button("Inizia Avventura") and nome:
-            # FIX: Equipaggiamento completo come descritto da Gemini
+            # FIX DEFINITIVO: Allineamento nomi oggetti con la narrazione
             setup = {
                 "Guerriero": (12, 0, ["Spada Lunga", "Scudo", "Cotta di Maglia", "Razioni"], ["Azione Impetuosa"], []),
                 "Mago": (6, 3, ["Bastone Arcano", "Libro Incantesimi", "Razioni"], ["Recupero Arcano"], ["Dardo Incantato", "Scudo"]),
@@ -150,7 +146,6 @@ else:
         with st.chat_message("assistant"):
             r = model.generate_content(sys + "\n" + pr).text
             
-            # Parsing potenziato per lo zaino
             if "[[PRENDI:" in r:
                 oggetto = r.split("[[PRENDI:")[1].split("]]")[0]
                 st.session_state.inventario.append(oggetto)
