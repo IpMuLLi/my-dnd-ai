@@ -126,7 +126,6 @@ with st.sidebar:
             for img in reversed(st.session_state.gallery):
                 st.image(img["url"], caption=img["caption"])
 
-        # Esporta Salvataggio sempre disponibile in Sidebar
         save_data = json.dumps({k: v for k, v in st.session_state.items() if k != "GEMINI_API_KEY"}, indent=4)
         st.download_button("💾 Esporta Salvataggio", save_data, file_name=f"sav_{st.session_state.personaggio['nome']}.json", use_container_width=True)
 
@@ -138,7 +137,6 @@ with st.sidebar:
 if st.session_state.game_phase == "creazione":
     st.title("🎲 Creazione Personaggio")
     
-    # --- RECUPERATO: CARICAMENTO SALVATAGGIO ---
     with st.expander("📂 Carica Personaggio Esistente"):
         up_file = st.file_uploader("Carica file .json", type="json")
         if up_file:
@@ -162,8 +160,9 @@ if st.session_state.game_phase == "creazione":
         for i, (s, v) in enumerate(st.session_state.temp_stats.items()):
             cols[i%3].metric(s, v)
         
+        # FIX REROLL: Aggiorna senza svuotare per non tornare indietro
         if st.button("🔄 Reroll"):
-            st.session_state.temp_stats = {}
+            st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
 
         with st.form("creazione_finale"):
@@ -188,7 +187,6 @@ if st.session_state.game_phase == "creazione":
                     "game_phase": "playing"
                 })
                 
-                # Inizializzazione messaggio introduzione
                 st.session_state.messages.append({
                     "role": "assistant", 
                     "content": f"[[INTRODUZIONE]] Benvenuto, {nome}. La tua storia ha inizio..."
@@ -197,10 +195,8 @@ if st.session_state.game_phase == "creazione":
 
 else:
     st.title("⚔️ D&D Legend Engine 2026")
-    if st.session_state.current_image:
-        st.image(st.session_state.current_image["url"], use_container_width=True)
-
-    # Interfaccia Tiri
+    
+    # Area Tiri
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("🎲 d20"): st.session_state.ultimo_tiro = random.randint(1, 20)
     if c2.button("🗡️ Attacco"): 
@@ -218,22 +214,31 @@ else:
 
     if st.session_state.ultimo_tiro: st.info(f"🎲 Risultato del Dado: **{st.session_state.ultimo_tiro}**")
 
-    # Visualizzazione Messaggi
+    # Visualizzazione Messaggi (con immagini integrate nella chat)
     for msg in st.session_state.messages:
         if "[[INTRODUZIONE]]" not in msg["content"]:
-            with st.chat_message(msg["role"]): st.markdown(msg["content"])
+            with st.chat_message(msg["role"]):
+                # Se il messaggio contiene un'immagine associata (salvata in gallery)
+                st.markdown(msg["content"])
+                if "image_url" in msg:
+                    st.image(msg["image_url"], use_container_width=True)
 
     # Trigger Introduzione
     if len(st.session_state.messages) == 1 and "[[INTRODUZIONE]]" in st.session_state.messages[0]["content"]:
         with st.chat_message("assistant"):
             intro_prompt = f"Sei il DM. Introduci l'avventura per {st.session_state.personaggio['nome']}, {st.session_state.personaggio['razza']} {st.session_state.personaggio['classe']}. Equipaggiamento: {st.session_state.inventario}. Usa [[LUOGO:descrizione]]."
             response = model.generate_content(intro_prompt).text
+            img_url = None
             if "[[LUOGO:" in response:
                 loc = response.split("[[LUOGO:")[1].split("]]")[0]
-                genera_img(loc, "Scenario Iniziale")
+                img_url = genera_img(loc, "Scenario Iniziale")
             clean_intro = re.sub(r'\[\[.*?\]\]', '', response).strip()
             st.markdown(clean_intro)
+            if img_url: st.image(img_url, use_container_width=True)
+            
+            # Salviamo l'URL nell'oggetto messaggio per la persistenza
             st.session_state.messages[0]["content"] = clean_intro
+            if img_url: st.session_state.messages[0]["image_url"] = img_url
             st.rerun()
 
     # Chat Input & DM Engine
@@ -242,29 +247,43 @@ else:
         
         sys_p = f"""DM 5e. PG: {st.session_state.personaggio}. LV: {st.session_state.livello}. 
         Tiro: {st.session_state.ultimo_tiro if st.session_state.ultimo_tiro else 'Nessuno'}.
-        Tag: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[ITEM:nome]], [[DIARIO:testo]]."""
+        Tag obbligatori: [[LUOGO:desc]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[ITEM:nome]], [[DIARIO:testo]]."""
         
         with st.chat_message("assistant"):
             full_res = model.generate_content(sys_p + "\n" + prompt).text
+            img_url = None
             
             # Parsing dei Tag
-            if "[[LUOGO:" in full_res: genera_img(full_res.split("[[LUOGO:")[1].split("]]")[0], "Luogo")
+            if "[[LUOGO:" in full_res: 
+                loc = full_res.split("[[LUOGO:")[1].split("]]")[0]
+                img_url = genera_img(loc, "Luogo")
+            
             d_match = re.search(r'\[\[DANNO:(\d+)\]\]', full_res)
             if d_match: st.session_state.hp -= int(d_match.group(1))
+            
             o_match = re.search(r'\[\[ORO:(-?\d+)\]\]', full_res)
             if o_match: st.session_state.oro += int(o_match.group(1))
+            
             x_match = re.search(r'\[\[XP:(\d+)\]\]', full_res)
             if x_match: 
                 st.session_state.xp += int(x_match.group(1))
                 check_level_up()
+                
             i_match = re.search(r'\[\[ITEM:(.*?)\]\]', full_res)
             if i_match: st.session_state.inventario.append(i_match.group(1).strip())
+            
             if "[[DIARIO:" in full_res: 
                 st.session_state.diario += "\n- " + full_res.split("[[DIARIO:")[1].split("]]")[0]
             
             clean_res = re.sub(r'\[\[.*?\]\]', '', full_res).strip()
             st.markdown(clean_res)
-            st.session_state.messages.append({"role": "assistant", "content": clean_res})
+            if img_url: st.image(img_url, use_container_width=True)
+            
+            # Aggiunta al log con immagine per persistenza
+            new_msg = {"role": "assistant", "content": clean_res}
+            if img_url: new_msg["image_url"] = img_url
+            st.session_state.messages.append(new_msg)
+            
             st.session_state.ultimo_tiro = None
             st.rerun()
             
