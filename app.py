@@ -14,7 +14,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
-# Recupero chiave Pollinations (Opzionale ma raccomandata per evitare rate limit)
+# Recupero chiave Pollinations (Opzionale)
 POLL_KEY = st.secrets.get("POLLINATIONS_API_KEY", None)
 
 # CORE MODEL: Gemini 2.5 Flash Lite
@@ -36,7 +36,7 @@ def genera_img(descrizione, tipo):
         prompt_base = f"Dungeons and Dragons realistic high fantasy, {tipo}: {descrizione}, cinematic lighting, 8k, masterpiece, no text"
         prompt_encoded = urllib.parse.quote(prompt_base)
         
-        # FIX: Aggiornamento al nuovo endpoint 2026 (gen.pollinations.ai)
+        # Endpoint 2026
         base_url = f"https://gen.pollinations.ai/image/{prompt_encoded}"
         
         params = [
@@ -52,10 +52,10 @@ def genera_img(descrizione, tipo):
             
         url = f"{base_url}?{'&'.join(params)}"
         
-        # Gestione Galleria (Nuova Feature)
+        # Gestione Galleria
         if "gallery" not in st.session_state:
             st.session_state.gallery = []
-        # Evitiamo duplicati identici in cima
+        # Evita duplicati in cima
         if not st.session_state.gallery or st.session_state.gallery[0]['url'] != url:
             st.session_state.gallery.insert(0, {"url": url, "desc": descrizione})
         
@@ -64,8 +64,8 @@ def genera_img(descrizione, tipo):
 
 def genera_loot(rarita="Comune"):
     tabella = {
-        "Comune": ["Pozione di Guarigione", "Pergamena di Dardo Incantato", "Olio per Affilare", "Torcia", "Razioni"],
-        "Non Comune": ["Spada +1", "Anello di Protezione", "Mantello del Saltimpalo", "Borsa Conservante"],
+        "Comune": ["Pozione di Guarigione", "Pergamena di Dardo Incantato", "Olio per Affilare", "Torcia", "Razioni", "Corda di Seta"],
+        "Non Comune": ["Spada +1", "Anello di Protezione", "Mantello del Saltimpalo", "Borsa Conservante", "Stivali Alati"],
         "Raro": ["Armatura di Piastre +1", "Bacchetta delle Palle di Fuoco", "Pozione di Forza del Gigante"]
     }
     scelta = random.choice(tabella.get(rarita, tabella["Comune"]))
@@ -79,7 +79,7 @@ def aggiorna_diario(evento):
     if "journal" not in st.session_state:
         st.session_state.journal = []
     st.session_state.journal.append(f"- {evento}")
-    # Mantiene il diario pulito (ultimi 15 eventi) per non intasare il prompt
+    # Mantiene il diario pulito (ultimi 15 eventi chiave)
     if len(st.session_state.journal) > 15:
         st.session_state.journal.pop(0)
 
@@ -155,7 +155,7 @@ with st.sidebar:
         p = st.session_state.personaggio
         aggiorna_ca()
         
-        # TAB PRINCIPALI PER ORGANIZZAZIONE VISIVA
+        # TAB PRINCIPALI
         tab1, tab2, tab3, tab4 = st.tabs(["Status", "Stats", "Abilità", "Extra"])
         
         with tab1:
@@ -289,15 +289,13 @@ else:
             else:
                 st.caption("Nessuna immagine generata.")
 
-    # Inizializzazione Intro - FIX ASTERISCHI
+    # Intro Logic
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
         p = st.session_state.personaggio
-        # Istruzioni più chiare per evitare che il nome del luogo finisca nel tag rimosso
         res = model.generate_content(
             f"DM. Inizia avventura per {p['nome']} un {p['razza']} {p['classe']}. "
-            f"Descrivi l'ambiente circostante in modo evocativo. "
-            f"IMPORTANTE: Inserisci il nome del luogo nel testo normale. "
-            f"Solo ALLA FINE del messaggio aggiungi [[LUOGO:descrizione visiva sintetica]] per generare l'immagine."
+            f"Descrivi l'ambiente in modo evocativo (max 80 parole). "
+            f"Usa [[LUOGO:descrizione visiva]] *alla fine* del messaggio."
         ).text
         
         img_url = None
@@ -310,35 +308,48 @@ else:
         st.session_state.messages[-1] = {"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img_url}
         st.rerun()
 
-    # Render Messaggi
+    # Render Chat
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
                 if msg.get("image_url"): st.image(msg["image_url"])
 
-    # Input Utente
+    # Input Utente e Logica Core
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         p = st.session_state.personaggio
         journal_str = "\n".join(st.session_state.journal)
         
-        # FIX ASTERISCHI NEL SYSTEM PROMPT
+        # --- LOGICA 5 SCAMBI (MEMORIA CONTESTUALE) ---
+        # Prendiamo gli ultimi 10 messaggi (User + AI) escludendo il system
+        # Questo permette al DM di ricordare "ho appena detto che c'è un cespuglio"
+        msgs_to_include = st.session_state.messages[-11:-1] # Escludiamo l'ultimo appena aggiunto per non duplicarlo nel system
+        history_text = ""
+        for m in msgs_to_include:
+            if m["role"] != "system":
+                # Pulizia base per risparmiare token e confusione
+                content_clean = re.sub(r'http\S+', '', m["content"]).strip() 
+                history_text += f"{m['role'].upper()}: {content_clean}\n"
+
+        # System Prompt con Memoria Iniettata
         sys = (f"Sei il DM (5e). PG: {p['nome']} {p['classe']}. HP:{st.session_state.hp}/{st.session_state.hp_max}. "
-               f"Stats: {p['stats']}. Inventario: {st.session_state.inventario}. "
-               f"Eventi recenti: {journal_str}. "
+               f"Stats: {p['stats']}. Equip: {st.session_state.inventario}. "
+               f"Diario Globale: {journal_str}. "
                f"Ultimo Dado Utente: {st.session_state.ultimo_tiro}. "
                f"Nemico Attivo: {st.session_state.nemico_corrente}. "
-               f"Regole Output: Usa [[NEMICO:nome|hp|ca]] per spawnare, [[DANNO_NEMICO:n]] se il pg colpisce, "
-               f"[[LOOT:rarità]], [[DANNO:n]] se pg ferito, [[ORO:n]], [[XP:n]]. "
-               f"Per i luoghi: Descrivili nel testo, e metti [[LUOGO:descrizione visiva]] *in fondo* (non mettere il nome nel tag, il tag viene cancellato).")
+               f"\n--- STORIA RECENTE (Context) ---\n{history_text}\n"
+               f"--- ISTRUZIONI ---\n"
+               f"Usa [[NEMICO:nome|hp|ca]] per spawnare, [[DANNO_NEMICO:n]], [[LOOT:rarità]], "
+               f"[[DANNO:n]], [[ORO:n]], [[XP:n]]. "
+               f"Se cambi scena, metti [[LUOGO:descrizione visiva]] in fondo. "
+               f"NON ripetere descrizioni appena date. Reagisci logicamente all'ultima azione.")
         
         try:
-            res = model.generate_content(sys + "\nGiocatore: " + prompt).text
+            res = model.generate_content(sys + "\n\nAZIONE ATTUALE: " + prompt).text
             
-            # --- PARSING DEI TAG ---
-            
+            # --- PARSING E GESTIONE TAG ---
             # 1. Nemici
             n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', res)
             if n_m: 
@@ -348,7 +359,7 @@ else:
                 if not any(b['nome'] == enemy_data['nome'] for b in st.session_state.bestiary):
                     st.session_state.bestiary.append(enemy_data)
 
-            # 2. Danno al Nemico
+            # 2. Danno Nemico
             dn_m = re.search(r'\[\[DANNO_NEMICO:(\d+)\]\]', res)
             if dn_m and st.session_state.nemico_corrente:
                 dmg = int(dn_m.group(1))
@@ -357,7 +368,7 @@ else:
                     aggiorna_diario(f"Sconfitto: {st.session_state.nemico_corrente['nome']}")
                     st.session_state.nemico_corrente = None
             
-            # 3. XP e Oro
+            # 3. XP/Oro
             xp_m = re.search(r'\[\[XP:(\d+)\]\]', res)
             if xp_m: 
                 xp_val = int(xp_m.group(1))
@@ -367,14 +378,14 @@ else:
             o_m = re.search(r'\[\[ORO:(-?\d+)\]\]', res)
             if o_m: st.session_state.oro = max(0, st.session_state.oro + int(o_m.group(1)))
             
-            # 4. Danno al Giocatore
+            # 4. Danno Giocatore
             d_m = re.search(r'\[\[DANNO:(\d+)\]\]', res)
             if d_m: 
                 dmg_pg = int(d_m.group(1))
                 st.session_state.hp = max(0, st.session_state.hp - dmg_pg)
                 aggiorna_diario(f"Subiti {dmg_pg} danni")
 
-            # 5. Generazione Immagine
+            # 5. Immagini
             img_url = None
             if "[[LUOGO:" in res:
                 try:
@@ -382,7 +393,6 @@ else:
                     img_url = genera_img(desc_luogo, "Scene")
                 except: pass
 
-            # Pulizia e Output
             clean_res = re.sub(r'\[\[.*?\]\]', '', res).strip()
             st.session_state.messages.append({"role": "assistant", "content": clean_res, "image_url": img_url})
             st.session_state.ultimo_tiro = None
@@ -390,4 +400,4 @@ else:
             
         except Exception as e:
             st.error(f"Errore API: {e}")
-                        
+            
