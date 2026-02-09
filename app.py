@@ -104,154 +104,162 @@ def check_level_up():
 
 check_level_up()
 
-# --- 4. SIDEBAR (CON TASTI AZIONE FISSI) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.title("🧝 Scheda Eroe")
     if st.session_state.personaggio.get("nome"):
         p = st.session_state.personaggio
         aggiorna_ca()
+        
         st.subheader(f"{p['nome']} (Lv. {st.session_state.livello})")
         
-        # Barra XP
-        xp_attuale = st.session_state.xp
-        liv_corrente = st.session_state.livello
-        xp_min = XP_LEVELS.get(liv_corrente, 0)
-        xp_max = XP_LEVELS.get(liv_corrente + 1, xp_attuale + 1000)
-        progresso_xp = max(0.0, min(1.0, (xp_attuale - xp_min) / (xp_max - xp_min)))
-        
-        st.write(f"✨ XP: {xp_attuale} / {xp_max}")
-        st.progress(progresso_xp)
+        # BARRA XP
+        xp_max = XP_LEVELS.get(st.session_state.livello + 1, st.session_state.xp + 1000)
+        st.write(f"✨ XP: {st.session_state.xp} / {xp_max}")
+        st.progress(max(0.0, min(1.0, st.session_state.xp / xp_max)))
 
-        # Pulsantiera Rapida (Sempre visibile qui)
+        # AZIONI FISSE
         st.divider()
-        st.subheader("🎲 Azioni Rapide")
         c1, c2 = st.columns(2)
         if c1.button("🎲 d20"): st.session_state.ultimo_tiro = random.randint(1, 20)
         if c2.button("⚔️ Attacco"): 
-            stat = "Destrezza" if st.session_state.personaggio['classe'] in ["Ladro", "Ranger"] else "Forza"
-            st.session_state.ultimo_tiro = random.randint(1, 20) + calcola_mod(st.session_state.personaggio['stats'][stat]) + st.session_state.bonus_competenza
+            stat = "Destrezza" if p['classe'] in ["Ladro", "Ranger"] else "Forza"
+            st.session_state.ultimo_tiro = random.randint(1, 20) + calcola_mod(p['stats'][stat]) + st.session_state.bonus_competenza
         
         c3, c4 = st.columns(2)
         if c3.button("⛺ Riposo"):
             st.session_state.hp = st.session_state.hp_max
-            st.toast("HP Ripristinati!")
+            st.session_state.spell_slots_curr = st.session_state.spell_slots_max
+            st.toast("Riposo completato!")
         if c4.button("🎁 Loot"): genera_loot()
-        
+
         if st.session_state.ultimo_tiro:
-            st.info(f"Ultimo Lancio: **{st.session_state.ultimo_tiro}**")
+            st.info(f"Ultimo Tiro: **{st.session_state.ultimo_tiro}**")
 
-        # Stats Vita
-        c_hp1, c_hp2 = st.columns(2)
-        c_hp1.metric("❤️ HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
-        c_hp2.metric("🛡️ CA", st.session_state.ca)
+        # STATISTICHE VITALI
+        st.divider()
+        col_hp, col_ca = st.columns(2)
+        col_hp.metric("❤️ HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
+        col_ca.metric("🛡️ CA", st.session_state.ca)
 
+        # --- CARATTERISTICHE (VISIBILI) ---
+        st.write("### 📊 Caratteristiche")
+        cols_stats = st.columns(3)
+        stats_list = list(p['stats'].items())
+        for i in range(6):
+            s, v = stats_list[i]
+            cols_stats[i%3].write(f"**{s[:3]}**: {v}\n({calcola_mod(v):+})")
+
+        # --- MAGIE E SLOT (VISIBILI SE APPLICABILI) ---
+        if p['magie']:
+            st.divider()
+            st.write("### 🪄 Magie")
+            if st.session_state.spell_slots_max > 0:
+                st.write(f"Slot: {st.session_state.spell_slots_curr}/{st.session_state.spell_slots_max}")
+            for m in p['magie']:
+                st.caption(f"✨ {m}")
+
+        # BESTIARIO
         if st.session_state.nemico_corrente:
             st.divider()
             n = st.session_state.nemico_corrente
-            st.warning(f"**Nemico: {n['nome']}**")
+            st.error(f"⚔️ **{n['nome']}**")
             st.write(f"HP: {n['hp']} | CA: {n['ca']}")
             st.progress(max(0.0, min(1.0, n['hp'] / n['hp_max'])))
 
-        with st.expander("🎒 Inventario"):
-            st.write(f"💰 Oro: **{st.session_state.oro}**")
-            for item in st.session_state.inventario: st.write(f"- {item}")
+        # Altro (Expander per non ingombrare)
+        with st.expander("🎒 Inventario & Oro"):
+            st.write(f"💰 Oro: {st.session_state.oro}")
+            for i in st.session_state.inventario: st.write(f"- {i}")
 
-        with st.expander("📊 Abilità"):
-            for skill, stat_ref in SKILL_MAP.items():
-                bonus = calcola_mod(p['stats'].get(stat_ref, 10))
-                if skill in p['competenze']: bonus += st.session_state.bonus_competenza
-                st.write(f"{'🌟' if skill in p['competenze'] else ''} {skill}: `{bonus:+}`")
+        with st.expander("🌟 Abilità"):
+            for sk, st_ref in SKILL_MAP.items():
+                b = calcola_mod(p['stats'].get(st_ref, 10))
+                if sk in p['competenze']: b += st.session_state.bonus_competenza
+                st.write(f"{'●' if sk in p['competenze'] else '○'} {sk}: {b:+}")
 
-        # Salvataggio
+        # SALVATAGGIO
         st.divider()
-        save_data = {k: v for k, v in st.session_state.items() if k != "temp_stats"}
-        st.download_button("💾 Esporta Salvataggio", data=json.dumps(save_data), file_name="dnd_save.json", mime="application/json")
+        sd = {k: v for k, v in st.session_state.items() if k != "temp_stats"}
+        st.download_button("💾 Salva", data=json.dumps(sd), file_name="hero.json")
 
 # --- 5. LOGICA DI GIOCO ---
 if st.session_state.game_phase == "creazione":
-    st.title("🎲 Officina di Mulli")
+    st.title("🎲 Creazione Eroe")
     
-    with st.expander("📂 Carica Personaggio Esistente"):
-        up_f = st.file_uploader("File .json", type="json", key="creation_load")
-        if up_f:
-            st.session_state.update(json.load(up_f))
-            st.success("Dati Ripristinati!")
+    with st.expander("📂 Carica Personaggio"):
+        f = st.file_uploader("Upload .json", type="json")
+        if f:
+            st.session_state.update(json.load(f))
             st.rerun()
 
     if not st.session_state.temp_stats:
-        if st.button("🎲 Tira Caratteristiche"):
+        if st.button("🎲 Genera Statistiche"):
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
     else:
-        st.write("### Statistiche")
-        cols = st.columns(6)
+        st.write("### Risultati dadi")
+        cs = st.columns(6)
         for i, (s, v) in enumerate(st.session_state.temp_stats.items()):
-            cols[i].metric(s, f"{v} ({calcola_mod(v):+})")
+            cs[i].metric(s, v)
         
         if st.button("🔄 Reroll"):
             st.session_state.temp_stats = {s: tira_statistica() for s in ["Forza", "Destrezza", "Costituzione", "Intelligenza", "Saggezza", "Carisma"]}
             st.rerun()
 
-        st.divider()
-        with st.form("crea"):
-            nome = st.text_input("Nome")
-            razza = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
-            classe = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
+        with st.form("f_crea"):
+            n = st.text_input("Nome")
+            r = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Tiefling", "Mezzelfo"])
+            c = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Ranger", "Chierico"])
             if st.form_submit_button("Inizia"):
-                if nome:
-                    mod_cos = calcola_mod(st.session_state.temp_stats["Costituzione"])
-                    hp_hit_die = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
-                    hp_m = hp_hit_die[classe] + mod_cos
+                if n:
+                    mod_c = calcola_mod(st.session_state.temp_stats["Costituzione"])
+                    hd = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
+                    hp = hd[c] + mod_c
                     st.session_state.update({
-                        "personaggio": {"nome": nome, "classe": classe, "razza": razza, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[classe], "magie": MAGIE_INIZIALI[classe]},
-                        "hp": hp_m, "hp_max": hp_m, "inventario": EQUIP_AVANZATO[classe], "game_phase": "playing"
+                        "personaggio": {"nome": n, "classe": c, "razza": r, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[c], "magie": MAGIE_INIZIALI[c]},
+                        "hp": hp, "hp_max": hp, "inventario": EQUIP_AVANZATO[c], "game_phase": "playing",
+                        "spell_slots_max": 2 if c in ["Mago", "Chierico"] else 0, "spell_slots_curr": 2 if c in ["Mago", "Chierico"] else 0
                     })
                     st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
                     st.rerun()
 
 else:
-    st.title("🛡️ Cronache del Destino")
+    st.title("🛡️ Avventura")
     
-    # Intro automatica
+    # Intro
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
         p = st.session_state.personaggio
-        prompt = f"Sei il DM. Narra l'inizio per {p['nome']} ({p['razza']} {p['classe']}). Usa [[LUOGO:desc]]."
-        res = model.generate_content(prompt).text
+        res = model.generate_content(f"DM. Inizia avventura per {p['nome']} ({p['classe']}). Usa [[LUOGO:desc]].").text
         img = genera_img(res.split("[[LUOGO:")[1].split("]]")[0], "Scena") if "[[LUOGO:" in res else None
         st.session_state.messages[-1] = {"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img}
         st.rerun()
 
-    # Chat Rendering
+    # Chat
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
                 if msg.get("image_url"): st.image(msg["image_url"])
 
-    if prompt := st.chat_input("Cosa fa l'eroe?"):
+    if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
         p = st.session_state.personaggio
-        sys = (f"DM 5e. PG: {p['nome']} ({p['classe']}). HP:{st.session_state.hp}. CA:{st.session_state.ca}. "
-               f"Tiro Dado: {st.session_state.ultimo_tiro}. Usa i tag: [[NEMICO:nome|hp|ca]], [[DANNO_NEMICO:n]], [[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
-        
+        sys = (f"DM 5e. PG: {p['nome']} {p['classe']}. HP:{st.session_state.hp}. Dado:{st.session_state.ultimo_tiro}. "
+               f"Usa [[NEMICO:nome|hp|ca]], [[DANNO_NEMICO:n]], [[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
         res = model.generate_content(sys + "\n" + prompt).text
         
-        # Parsing Meccaniche
+        # Meccaniche
         n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', res)
         if n_m: st.session_state.nemico_corrente = {"nome": n_m.group(1), "hp": int(n_m.group(2)), "hp_max": int(n_m.group(2)), "ca": int(n_m.group(3))}
-        
         dn_m = re.search(r'\[\[DANNO_NEMICO:(\d+)\]\]', res)
         if dn_m and st.session_state.nemico_corrente:
             st.session_state.nemico_corrente["hp"] -= int(dn_m.group(1))
             if st.session_state.nemico_corrente["hp"] <= 0: st.session_state.nemico_corrente = None
-
         xp_m = re.search(r'\[\[XP:(\d+)\]\]', res)
         if xp_m: st.session_state.xp += int(xp_m.group(1))
-        
         o_m = re.search(r'\[\[ORO:(-?\d+)\]\]', res)
         if o_m: st.session_state.oro = max(0, st.session_state.oro + int(o_m.group(1)))
-        
         d_m = re.search(r'\[\[DANNO:(\d+)\]\]', res)
         if d_m: st.session_state.hp = max(0, st.session_state.hp - int(d_m.group(1)))
 
