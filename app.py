@@ -52,10 +52,9 @@ def genera_img(descrizione, tipo):
             
         url = f"{base_url}?{'&'.join(params)}"
         
-        # Gestione Galleria
+        # Gestione Galleria (Memoria)
         if "gallery" not in st.session_state:
             st.session_state.gallery = []
-        # Evita duplicati in cima
         if not st.session_state.gallery or st.session_state.gallery[0]['url'] != url:
             st.session_state.gallery.insert(0, {"url": url, "desc": descrizione})
         
@@ -72,6 +71,7 @@ def genera_loot(rarita="Comune"):
     if scelta not in st.session_state.inventario:
         st.session_state.inventario.append(scelta)
         aggiorna_diario(f"Trovato oggetto: {scelta} ({rarita})")
+        st.toast(f"Trovato: {scelta}", icon="🎁")
     return scelta
 
 def aggiorna_diario(evento):
@@ -79,8 +79,7 @@ def aggiorna_diario(evento):
     if "journal" not in st.session_state:
         st.session_state.journal = []
     st.session_state.journal.append(f"- {evento}")
-    # Mantiene il diario pulito (ultimi 15 eventi chiave)
-    if len(st.session_state.journal) > 15:
+    if len(st.session_state.journal) > 20:
         st.session_state.journal.pop(0)
 
 # --- 2. DATASETS ORIGINALI ---
@@ -124,7 +123,7 @@ if "messages" not in st.session_state:
         "inventario": [], "spell_slots_max": 0, "spell_slots_curr": 0,
         "ultimo_tiro": None, "temp_stats": {}, "ca": 10, "event_log": [],
         "nemico_corrente": None,
-        "gallery": [], "bestiary": [], "journal": [] 
+        "gallery": [], "bestiary": [], "journal": ["- Inizio dell'avventura"] 
     })
 
 def aggiorna_ca():
@@ -147,20 +146,21 @@ def check_level_up():
 
 check_level_up()
 
-# --- 4. SIDEBAR ---
+# --- 4. SIDEBAR RISTRUTTURATA (CLEAN) ---
 with st.sidebar:
-    st.title("🧝 Scheda Eroe")
+    st.title("🧝 D&D Engine")
     
     if st.session_state.personaggio.get("nome"):
         p = st.session_state.personaggio
         aggiorna_ca()
         
         # TAB PRINCIPALI
-        tab1, tab2, tab3, tab4 = st.tabs(["Status", "Stats", "Abilità", "Extra"])
+        main_tabs = st.tabs(["📊 Eroe", "📚 Diario"])
         
-        with tab1:
-            st.subheader(f"{p['nome']} ({p['razza']} {p['classe']})")
-            st.metric("Livello", st.session_state.livello, f"XP: {st.session_state.xp}")
+        # --- TAB 1: SCHEDA EROE ---
+        with main_tabs[0]:
+            st.subheader(f"{p['nome']} (Lv. {st.session_state.livello})")
+            st.caption(f"{p['razza']} {p['classe']} | XP: {st.session_state.xp}")
             
             c1, c2 = st.columns(2)
             c1.metric("❤️ HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
@@ -186,36 +186,59 @@ with st.sidebar:
             
             if st.session_state.ultimo_tiro:
                 st.info(f"Esito: **{st.session_state.ultimo_tiro}**")
-
-        with tab2:
-            st.caption("Caratteristiche & Modificatori")
-            for stat, val in p['stats'].items():
-                mod = calcola_mod(val)
-                segno = "+" if mod >= 0 else ""
-                st.text(f"{stat.ljust(12)}: {val} ({segno}{mod})")
-
-        with tab3:
-            st.caption(f"Bonus Competenza: +{st.session_state.bonus_competenza}")
-            for skill, stat_ref in SKILL_MAP.items():
-                is_proficient = skill in p['competenze']
-                mod_stat = calcola_mod(p['stats'][stat_ref])
-                bonus = mod_stat + (st.session_state.bonus_competenza if is_proficient else 0)
-                
-                segno = "+" if bonus >= 0 else ""
-                prefix = "✅" if is_proficient else "⬜"
-                st.text(f"{prefix} {skill.ljust(16)} {segno}{bonus}")
-
-        with tab4:
-            if p['magie']:
-                st.write("**✨ Grimorio**")
-                st.caption(f"Slot: {st.session_state.spell_slots_curr}/{st.session_state.spell_slots_max}")
-                for m in p['magie']:
-                    st.code(m, language=None)
             
-            st.write(f"**💰 Oro:** {st.session_state.oro} mo")
-            with st.expander("Zaino"):
+            # Sotto-Tab Dettagli
+            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Stats", "Abilità", "Zaino"])
+            
+            with sub_tab1:
+                for stat, val in p['stats'].items():
+                    mod = calcola_mod(val)
+                    segno = "+" if mod >= 0 else ""
+                    st.text(f"{stat[:3].upper()}: {val} ({segno}{mod})")
+
+            with sub_tab2:
+                st.caption("Clicca per tirare:")
+                for skill, stat_ref in SKILL_MAP.items():
+                    is_proficient = skill in p['competenze']
+                    mod_stat = calcola_mod(p['stats'][stat_ref])
+                    bonus = mod_stat + (st.session_state.bonus_competenza if is_proficient else 0)
+                    segno = "+" if bonus >= 0 else ""
+                    prefix = "✅" if is_proficient else "⬜"
+                    
+                    sk_col1, sk_col2 = st.columns([3, 1])
+                    sk_col1.markdown(f"**{skill}** ({prefix})")
+                    if sk_col2.button(f"{segno}{bonus}", key=f"btn_{skill}"):
+                        dado = random.randint(1, 20)
+                        totale = dado + bonus
+                        st.session_state.ultimo_tiro = f"{totale} ({skill}: {dado} {segno} {bonus})"
+                        st.rerun()
+
+            with sub_tab3:
+                st.write(f"**💰 Oro:** {st.session_state.oro} mo")
+                if p['magie']:
+                    st.caption(f"Slot: {st.session_state.spell_slots_curr}/{st.session_state.spell_slots_max}")
+                    st.write("Magie:", ", ".join(p['magie']))
+                
+                # NIENTE BOTTONE LOOT QUI. L'AI CI PENSA.
                 for i in st.session_state.inventario: st.write(f"- {i}")
-            if st.button("🎁 Cerca Loot"): genera_loot()
+
+        # --- TAB 2: DIARIO (Senza Galleria) ---
+        with main_tabs[1]:
+            st.write("### 📜 Diario Avventura")
+            if st.session_state.journal:
+                for entry in reversed(st.session_state.journal):
+                    st.caption(entry)
+            else:
+                st.caption("Il diario è ancora intonso.")
+            
+            st.divider()
+            
+            st.write("### 👹 Bestiario")
+            if st.session_state.bestiary:
+                for b in st.session_state.bestiary:
+                    st.error(f"**{b['nome']}** (HP Max: {b['hp_max']})")
+            else:
+                st.caption("Nessuna creatura registrata.")
 
         st.divider()
         sd = {k: v for k, v in st.session_state.items() if k != "temp_stats"}
@@ -267,27 +290,6 @@ if st.session_state.game_phase == "creazione":
 else:
     # --- LAYOUT AVVENTURA ---
     st.title("🛡️ Avventura")
-    
-    with st.expander("📖 Memorie, Bestiario e Galleria", expanded=False):
-        col_mem1, col_mem2, col_mem3 = st.columns(3)
-        with col_mem1:
-            st.markdown("### 📜 Diario")
-            for entry in st.session_state.journal[-5:]:
-                st.caption(entry)
-        with col_mem2:
-            st.markdown("### 👹 Bestiario")
-            if st.session_state.bestiary:
-                for b in st.session_state.bestiary:
-                    st.text(f"{b['nome']} (Max HP: {b['hp_max']})")
-            else:
-                st.caption("Nessun mostro incontrato.")
-        with col_mem3:
-            st.markdown("### 🖼️ Galleria")
-            if st.session_state.gallery:
-                last_img = st.session_state.gallery[0]
-                st.image(last_img['url'], caption="Recente", use_container_width=True)
-            else:
-                st.caption("Nessuna immagine generata.")
 
     # Intro Logic
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
@@ -315,25 +317,22 @@ else:
                 st.write(msg["content"])
                 if msg.get("image_url"): st.image(msg["image_url"])
 
-    # Input Utente e Logica Core
+    # Input Utente
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
         p = st.session_state.personaggio
         journal_str = "\n".join(st.session_state.journal)
         
-        # --- LOGICA 5 SCAMBI (MEMORIA CONTESTUALE) ---
-        # Prendiamo gli ultimi 10 messaggi (User + AI) escludendo il system
-        # Questo permette al DM di ricordare "ho appena detto che c'è un cespuglio"
-        msgs_to_include = st.session_state.messages[-11:-1] # Escludiamo l'ultimo appena aggiunto per non duplicarlo nel system
+        # --- MEMORIA (Context Injection) ---
+        msgs_to_include = st.session_state.messages[-11:-1]
         history_text = ""
         for m in msgs_to_include:
             if m["role"] != "system":
-                # Pulizia base per risparmiare token e confusione
                 content_clean = re.sub(r'http\S+', '', m["content"]).strip() 
                 history_text += f"{m['role'].upper()}: {content_clean}\n"
 
-        # System Prompt con Memoria Iniettata
+        # System Prompt
         sys = (f"Sei il DM (5e). PG: {p['nome']} {p['classe']}. HP:{st.session_state.hp}/{st.session_state.hp_max}. "
                f"Stats: {p['stats']}. Equip: {st.session_state.inventario}. "
                f"Diario Globale: {journal_str}. "
@@ -341,15 +340,15 @@ else:
                f"Nemico Attivo: {st.session_state.nemico_corrente}. "
                f"\n--- STORIA RECENTE (Context) ---\n{history_text}\n"
                f"--- ISTRUZIONI ---\n"
-               f"Usa [[NEMICO:nome|hp|ca]] per spawnare, [[DANNO_NEMICO:n]], [[LOOT:rarità]], "
-               f"[[DANNO:n]], [[ORO:n]], [[XP:n]]. "
+               f"Usa [[NEMICO:nome|hp|ca]] per spawnare, [[DANNO_NEMICO:n]], "
+               f"[[LOOT:nome_oggetto]], [[DANNO:n]], [[ORO:n]], [[XP:n]]. "
                f"Se cambi scena, metti [[LUOGO:descrizione visiva]] in fondo. "
-               f"NON ripetere descrizioni appena date. Reagisci logicamente all'ultima azione.")
+               f"Reagisci logicamente all'ultima azione.")
         
         try:
             res = model.generate_content(sys + "\n\nAZIONE ATTUALE: " + prompt).text
             
-            # --- PARSING E GESTIONE TAG ---
+            # --- PARSING ---
             # 1. Nemici
             n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', res)
             if n_m: 
@@ -393,6 +392,11 @@ else:
                     img_url = genera_img(desc_luogo, "Scene")
                 except: pass
 
+            # 6. Loot Automatico (Novità)
+            l_m = re.search(r'\[\[LOOT:(.*?)\]\]', res)
+            if l_m:
+                genera_loot(l_m.group(1))
+
             clean_res = re.sub(r'\[\[.*?\]\]', '', res).strip()
             st.session_state.messages.append({"role": "assistant", "content": clean_res, "image_url": img_url})
             st.session_state.ultimo_tiro = None
@@ -400,4 +404,4 @@ else:
             
         except Exception as e:
             st.error(f"Errore API: {e}")
-            
+                        
