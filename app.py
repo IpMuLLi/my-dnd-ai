@@ -14,10 +14,10 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
-# Recupero chiave Pollinations per evitare Rate Limit
+# Recupero chiave Pollinations (Opzionale ma raccomandata per evitare rate limit)
 POLL_KEY = st.secrets.get("POLLINATIONS_API_KEY", None)
 
-# UPGRADE MODELLO: Passaggio a Gemini 2.5 Flash Lite
+# CORE MODEL: Gemini 2.5 Flash Lite
 model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 1. FUNZIONI TECNICHE ---
@@ -32,10 +32,27 @@ def calcola_mod(punteggio):
 def genera_img(descrizione, tipo):
     try:
         seed = random.randint(1, 99999)
+        # Prompt ottimizzato per il modello Flux
         prompt_base = f"Dungeons and Dragons realistic high fantasy, {tipo}: {descrizione}, cinematic lighting, 8k, masterpiece, no text"
         prompt_encoded = urllib.parse.quote(prompt_base)
-        # Usiamo Flux come richiesto, che beneficerà della tua API Key (associata al tuo IP/Account)
-        return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
+        
+        # FIX: Aggiornamento al nuovo endpoint 2026 (gen.pollinations.ai)
+        # La vecchia 'image.pollinations.ai' è deprecata per Flux e mostra il banner "We Have Moved".
+        base_url = f"https://gen.pollinations.ai/image/{prompt_encoded}"
+        
+        params = [
+            "width=1024",
+            "height=1024",
+            f"seed={seed}",
+            "nologo=true",
+            "model=flux" # Flux è supportato sul nuovo endpoint
+        ]
+        
+        # Aggiunge la chiave API se presente (necessaria per tier più alti o evitare limiti)
+        if POLL_KEY:
+            params.append(f"key={POLL_KEY}")
+            
+        return f"{base_url}?{'&'.join(params)}"
     except: return None
 
 def genera_loot(rarita="Comune"):
