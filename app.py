@@ -17,7 +17,8 @@ else:
 # Recupero chiave Pollinations per evitare Rate Limit
 POLL_KEY = st.secrets.get("POLLINATIONS_API_KEY", None)
 
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
+# UPGRADE MODELLO: Passaggio a Gemini 2.5 Flash Lite
+model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
 # --- 1. FUNZIONI TECNICHE ---
 def tira_statistica():
