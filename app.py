@@ -26,7 +26,7 @@ st.markdown("""
     /* Nasconde menu standard Streamlit per immersione */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    #header {visibility: hidden;}
     
     /* Stile Badge Inventario */
     .inventory-item {
