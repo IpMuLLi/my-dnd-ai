@@ -143,10 +143,17 @@ def check_level_up():
         st.session_state.bonus_competenza = 2 + ((st.session_state.livello - 1) // 4)
         aggiorna_diario(f"Level Up! Raggiunto livello {st.session_state.livello}")
         st.toast(f"✨ LIVELLO {st.session_state.livello}!", icon="⚔️")
+        
+        # Incremento Slot per Mago/Chierico/Ranger al level up
+        p_class = st.session_state.personaggio.get("classe", "")
+        if p_class in ["Mago", "Chierico"]:
+            st.session_state.spell_slots_max = 2 + (st.session_state.livello - 1)
+        elif p_class == "Ranger" and st.session_state.livello >= 2:
+             st.session_state.spell_slots_max = 2
 
 check_level_up()
 
-# --- 4. SIDEBAR RISTRUTTURATA (CLEAN) ---
+# --- 4. SIDEBAR RISTRUTTURATA (CLEAN v2.5) ---
 with st.sidebar:
     st.title("🧝 D&D Engine")
     
@@ -154,6 +161,11 @@ with st.sidebar:
         p = st.session_state.personaggio
         aggiorna_ca()
         
+        # HOTFIX PER RANGER LV1: Diamo 1 slot se non ne ha, per usare Marchio
+        if p['classe'] == "Ranger" and st.session_state.spell_slots_max == 0:
+            st.session_state.spell_slots_max = 1
+            st.session_state.spell_slots_curr = 1
+
         # TAB PRINCIPALI
         main_tabs = st.tabs(["📊 Eroe", "📚 Diario"])
         
@@ -187,8 +199,8 @@ with st.sidebar:
             if st.session_state.ultimo_tiro:
                 st.info(f"Esito: **{st.session_state.ultimo_tiro}**")
             
-            # Sotto-Tab Dettagli
-            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Stats", "Abilità", "Zaino"])
+            # Sotto-Tab Dettagli: ORA SONO 4 per separare Magia e Zaino
+            sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["Stats", "Abilità", "Magia", "Zaino"])
             
             with sub_tab1:
                 for stat, val in p['stats'].items():
@@ -213,16 +225,23 @@ with st.sidebar:
                         st.session_state.ultimo_tiro = f"{totale} ({skill}: {dado} {segno} {bonus})"
                         st.rerun()
 
-            with sub_tab3:
-                st.write(f"**💰 Oro:** {st.session_state.oro} mo")
+            with sub_tab3: # TAB MAGIA DEDICATO
                 if p['magie']:
-                    st.caption(f"Slot: {st.session_state.spell_slots_curr}/{st.session_state.spell_slots_max}")
-                    st.write("Magie:", ", ".join(p['magie']))
-                
-                # NIENTE BOTTONE LOOT QUI. L'AI CI PENSA.
-                for i in st.session_state.inventario: st.write(f"- {i}")
+                    st.write(f"**Slot:** {st.session_state.spell_slots_curr}/{st.session_state.spell_slots_max}")
+                    st.progress(st.session_state.spell_slots_curr / max(1, st.session_state.spell_slots_max))
+                    for m in p['magie']:
+                        st.code(m, language=None)
+                else:
+                    st.caption("Nessuna capacità magica.")
 
-        # --- TAB 2: DIARIO (Senza Galleria) ---
+            with sub_tab4: # TAB ZAINO (Solo oggetti)
+                st.write(f"**💰 Oro:** {st.session_state.oro} mo")
+                if not st.session_state.inventario:
+                    st.caption("Zaino vuoto.")
+                for i in st.session_state.inventario: 
+                    st.write(f"- {i}")
+
+        # --- TAB 2: DIARIO ---
         with main_tabs[1]:
             st.write("### 📜 Diario Avventura")
             if st.session_state.journal:
@@ -278,10 +297,13 @@ if st.session_state.game_phase == "creazione":
                     mod_c = calcola_mod(st.session_state.temp_stats["Costituzione"])
                     hd = {"Guerriero": 10, "Mago": 6, "Ladro": 8, "Ranger": 10, "Chierico": 8}
                     hp = hd[c] + mod_c
+                    # Assegnazione slot: Ranger parte con 1 slot per fix homebrew
+                    start_slots = 2 if c in ["Mago", "Chierico"] else (1 if c == "Ranger" else 0)
+                    
                     st.session_state.update({
                         "personaggio": {"nome": n, "classe": c, "razza": r, "stats": st.session_state.temp_stats, "competenze": COMPETENZE_CLASSE[c], "magie": MAGIE_INIZIALI[c]},
                         "hp": hp, "hp_max": hp, "inventario": EQUIP_AVANZATO[c], "game_phase": "playing",
-                        "spell_slots_max": 2 if c in ["Mago", "Chierico"] else 0, "spell_slots_curr": 2 if c in ["Mago", "Chierico"] else 0
+                        "spell_slots_max": start_slots, "spell_slots_curr": start_slots
                     })
                     aggiorna_diario(f"Inizia l'avventura di {n}.")
                     st.session_state.messages.append({"role": "system", "content": "START_INTRO"})
@@ -392,7 +414,7 @@ else:
                     img_url = genera_img(desc_luogo, "Scene")
                 except: pass
 
-            # 6. Loot Automatico (Novità)
+            # 6. Loot Automatico
             l_m = re.search(r'\[\[LOOT:(.*?)\]\]', res)
             if l_m:
                 genera_loot(l_m.group(1))
@@ -404,4 +426,4 @@ else:
             
         except Exception as e:
             st.error(f"Errore API: {e}")
-                        
+            
