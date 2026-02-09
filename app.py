@@ -227,3 +227,4 @@ else:
         st.session_state.messages.append({"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img} )
         st.session_state.ultimo_tiro = None
         st.rerun()
+        
