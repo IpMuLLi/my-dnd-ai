@@ -1,4 +1,4 @@
-    import streamlit as st
+import streamlit as st
 import google.generativeai as genai
 import random
 import json
@@ -41,7 +41,7 @@ def genera_img(descrizione, tipo):
         prompt_base = f"Dungeons and Dragons high fantasy, {tipo}: {descrizione}, cinematic, detailed, 8k, no text"
         prompt_encoded = urllib.parse.quote(prompt_base)
         
-        # URL per Pollinations. Con la Key sk_ attiva, il sistema riconosce l'account.
+        # URL per Pollinations. Il sistema riconosce l'account tramite IP/Key.
         return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
     except Exception: 
         return None
@@ -163,6 +163,10 @@ with st.sidebar:
             st.error(f"⚔️ In Combattimento: {n['nome']}")
             st.write(f"HP: {n['hp']}/{n['hp_max']} | CA: {n['ca']}")
 
+        st.divider()
+        sd = {k: v for k, v in st.session_state.items() if k != "temp_stats"}
+        st.download_button("💾 Salva Eroe", data=json.dumps(sd), file_name="hero.json")
+
 # --- 5. LOGICA DI GIOCO ---
 if st.session_state.game_phase == "creazione":
     st.title("🧙 Crea il tuo Eroe")
@@ -242,4 +246,4 @@ else:
         st.session_state.messages.append({"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img})
         st.session_state.ultimo_tiro = None
         st.rerun()
-                    
+        
