@@ -55,7 +55,9 @@ def genera_img(descrizione, tipo):
         # Gestione Galleria (Nuova Feature)
         if "gallery" not in st.session_state:
             st.session_state.gallery = []
-        st.session_state.gallery.insert(0, {"url": url, "desc": description})
+        # Evitiamo duplicati identici in cima
+        if not st.session_state.gallery or st.session_state.gallery[0]['url'] != url:
+            st.session_state.gallery.insert(0, {"url": url, "desc": descrizione})
         
         return url
     except: return None
@@ -122,7 +124,7 @@ if "messages" not in st.session_state:
         "inventario": [], "spell_slots_max": 0, "spell_slots_curr": 0,
         "ultimo_tiro": None, "temp_stats": {}, "ca": 10, "event_log": [],
         "nemico_corrente": None,
-        "gallery": [], "bestiary": [], "journal": [] # Nuovi stati
+        "gallery": [], "bestiary": [], "journal": [] 
     })
 
 def aggiorna_ca():
@@ -199,20 +201,17 @@ with st.sidebar:
                 mod_stat = calcola_mod(p['stats'][stat_ref])
                 bonus = mod_stat + (st.session_state.bonus_competenza if is_proficient else 0)
                 
-                # Visualizzazione grafica abilità
                 segno = "+" if bonus >= 0 else ""
                 prefix = "✅" if is_proficient else "⬜"
                 st.text(f"{prefix} {skill.ljust(16)} {segno}{bonus}")
 
         with tab4:
-            # Magie
             if p['magie']:
                 st.write("**✨ Grimorio**")
                 st.caption(f"Slot: {st.session_state.spell_slots_curr}/{st.session_state.spell_slots_max}")
                 for m in p['magie']:
                     st.code(m, language=None)
             
-            # Inventario
             st.write(f"**💰 Oro:** {st.session_state.oro} mo")
             with st.expander("Zaino"):
                 for i in st.session_state.inventario: st.write(f"- {i}")
@@ -269,12 +268,11 @@ else:
     # --- LAYOUT AVVENTURA ---
     st.title("🛡️ Avventura")
     
-    # Sezione Bestiario e Galleria e Diario (Collassabile)
     with st.expander("📖 Memorie, Bestiario e Galleria", expanded=False):
         col_mem1, col_mem2, col_mem3 = st.columns(3)
         with col_mem1:
             st.markdown("### 📜 Diario")
-            for entry in st.session_state.journal[-5:]: # Ultimi 5 eventi
+            for entry in st.session_state.journal[-5:]:
                 st.caption(entry)
         with col_mem2:
             st.markdown("### 👹 Bestiario")
@@ -286,21 +284,28 @@ else:
         with col_mem3:
             st.markdown("### 🖼️ Galleria")
             if st.session_state.gallery:
-                # Mostra l'ultima immagine
                 last_img = st.session_state.gallery[0]
                 st.image(last_img['url'], caption="Recente", use_container_width=True)
             else:
                 st.caption("Nessuna immagine generata.")
 
-    # Inizializzazione Intro
+    # Inizializzazione Intro - FIX ASTERISCHI
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
         p = st.session_state.personaggio
-        res = model.generate_content(f"DM. Inizia avventura per {p['nome']} un {p['razza']} {p['classe']}. Sii descrittivo. Usa [[LUOGO:desc]].").text
+        # Istruzioni più chiare per evitare che il nome del luogo finisca nel tag rimosso
+        res = model.generate_content(
+            f"DM. Inizia avventura per {p['nome']} un {p['razza']} {p['classe']}. "
+            f"Descrivi l'ambiente circostante in modo evocativo. "
+            f"IMPORTANTE: Inserisci il nome del luogo nel testo normale. "
+            f"Solo ALLA FINE del messaggio aggiungi [[LUOGO:descrizione visiva sintetica]] per generare l'immagine."
+        ).text
         
         img_url = None
         if "[[LUOGO:" in res:
-            desc_luogo = res.split("[[LUOGO:")[1].split("]]")[0]
-            img_url = genera_img(desc_luogo, "Environment")
+            try:
+                desc_luogo = res.split("[[LUOGO:")[1].split("]]")[0]
+                img_url = genera_img(desc_luogo, "Environment")
+            except: pass
             
         st.session_state.messages[-1] = {"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img_url}
         st.rerun()
@@ -316,17 +321,18 @@ else:
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # Costruzione Prompt di Sistema (La "Memoria" iniettata)
         p = st.session_state.personaggio
         journal_str = "\n".join(st.session_state.journal)
         
+        # FIX ASTERISCHI NEL SYSTEM PROMPT
         sys = (f"Sei il DM (5e). PG: {p['nome']} {p['classe']}. HP:{st.session_state.hp}/{st.session_state.hp_max}. "
                f"Stats: {p['stats']}. Inventario: {st.session_state.inventario}. "
                f"Eventi recenti: {journal_str}. "
                f"Ultimo Dado Utente: {st.session_state.ultimo_tiro}. "
                f"Nemico Attivo: {st.session_state.nemico_corrente}. "
                f"Regole Output: Usa [[NEMICO:nome|hp|ca]] per spawnare, [[DANNO_NEMICO:n]] se il pg colpisce, "
-               f"[[LOOT:rarità]], [[DANNO:n]] se pg ferito, [[ORO:n]], [[XP:n]], [[LUOGO:desc]] per nuove scene.")
+               f"[[LOOT:rarità]], [[DANNO:n]] se pg ferito, [[ORO:n]], [[XP:n]]. "
+               f"Per i luoghi: Descrivili nel testo, e metti [[LUOGO:descrizione visiva]] *in fondo* (non mettere il nome nel tag, il tag viene cancellato).")
         
         try:
             res = model.generate_content(sys + "\nGiocatore: " + prompt).text
@@ -339,7 +345,6 @@ else:
                 enemy_data = {"nome": n_m.group(1), "hp": int(n_m.group(2)), "hp_max": int(n_m.group(2)), "ca": int(n_m.group(3))}
                 st.session_state.nemico_corrente = enemy_data
                 aggiorna_diario(f"Apparso nemico: {enemy_data['nome']}")
-                # Aggiungi al bestiario se nuovo
                 if not any(b['nome'] == enemy_data['nome'] for b in st.session_state.bestiary):
                     st.session_state.bestiary.append(enemy_data)
 
@@ -372,15 +377,17 @@ else:
             # 5. Generazione Immagine
             img_url = None
             if "[[LUOGO:" in res:
-                desc_luogo = res.split("[[LUOGO:")[1].split("]]")[0]
-                img_url = genera_img(desc_luogo, "Scene")
+                try:
+                    desc_luogo = res.split("[[LUOGO:")[1].split("]]")[0]
+                    img_url = genera_img(desc_luogo, "Scene")
+                except: pass
 
             # Pulizia e Output
             clean_res = re.sub(r'\[\[.*?\]\]', '', res).strip()
             st.session_state.messages.append({"role": "assistant", "content": clean_res, "image_url": img_url})
-            st.session_state.ultimo_tiro = None # Reset dado dopo l'uso
+            st.session_state.ultimo_tiro = None
             st.rerun()
             
         except Exception as e:
             st.error(f"Errore API: {e}")
-                
+                        
