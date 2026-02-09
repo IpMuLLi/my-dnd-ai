@@ -13,7 +13,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configura GEMINI_API_KEY nei Secrets!")
 
-model = genai.GenerativeModel('gemini-2.5-flash-lite')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 # --- 1. FUNZIONI TECNICHE ---
 def tira_statistica():
@@ -42,6 +42,54 @@ def genera_loot(rarita="Comune"):
     if scelta not in st.session_state.inventario:
         st.session_state.inventario.append(scelta)
     return scelta
+
+# --- FUNZIONE DI PARSING EVOLUTA (Risolve il bug del testo mancante) ---
+def processa_risposta_dm(testo_raw):
+    """
+    Estrae i dati dai tag e pulisce il testo per la chat.
+    Reintegra il nome del nemico nel testo leggibile invece di cancellarlo.
+    """
+    testo_lavoro = testo_raw
+    
+    # Gestione Nemico: Estrae i dati e sostituisce il tag col solo Nome
+    n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', testo_lavoro)
+    if n_m:
+        nome_nemico = n_m.group(1)
+        st.session_state.nemico_corrente = {
+            "nome": nome_nemico, 
+            "hp": int(n_m.group(2)), 
+            "hp_max": int(n_m.group(2)), 
+            "ca": int(n_m.group(3))
+        }
+        # Invece di cancellare tutto, lasciamo il nome del nemico nel testo
+        testo_lavoro = testo_lavoro.replace(n_m.group(0), f"**{nome_nemico}**")
+
+    # Danno al Nemico
+    dn_m = re.search(r'\[\[DANNO_NEMICO:(\d+)\]\]', testo_lavoro)
+    if dn_m and st.session_state.nemico_corrente:
+        st.session_state.nemico_corrente["hp"] -= int(dn_m.group(1))
+        if st.session_state.nemico_corrente["hp"] <= 0:
+            st.session_state.nemico_corrente = None
+    
+    # Altre meccaniche (XP, Oro, Danno al PG)
+    xp_m = re.search(r'\[\[XP:(\d+)\]\]', testo_lavoro)
+    if xp_m: st.session_state.xp += int(xp_m.group(1))
+    
+    o_m = re.search(r'\[\[ORO:(-?\d+)\]\]', testo_lavoro)
+    if o_m: st.session_state.oro = max(0, st.session_state.oro + int(o_m.group(1)))
+    
+    d_m = re.search(r'\[\[DANNO:(\d+)\]\]', testo_lavoro)
+    if d_m: st.session_state.hp = max(0, st.session_state.hp - int(d_m.group(1)))
+
+    # Immagine Luogo
+    img = None
+    if "[[LUOGO:" in testo_lavoro:
+        desc_luogo = testo_lavoro.split("[[LUOGO:")[1].split("]]")[0]
+        img = genera_img(desc_luogo, "Scena")
+
+    # Pulizia finale di ogni tag residuo per non sporcare la UI
+    testo_finale = re.sub(r'\[\[.*?\]\]', '', testo_lavoro).strip()
+    return testo_finale, img
 
 # --- 2. DATASETS ---
 SKILL_MAP = {
@@ -113,12 +161,10 @@ with st.sidebar:
         
         st.subheader(f"{p['nome']} (Lv. {st.session_state.livello})")
         
-        # BARRA XP
         xp_max = XP_LEVELS.get(st.session_state.livello + 1, st.session_state.xp + 1000)
         st.write(f"✨ XP: {st.session_state.xp} / {xp_max}")
         st.progress(max(0.0, min(1.0, st.session_state.xp / xp_max)))
 
-        # AZIONI FISSE
         st.divider()
         c1, c2 = st.columns(2)
         if c1.button("🎲 d20"): st.session_state.ultimo_tiro = random.randint(1, 20)
@@ -136,13 +182,11 @@ with st.sidebar:
         if st.session_state.ultimo_tiro:
             st.info(f"Ultimo Tiro: **{st.session_state.ultimo_tiro}**")
 
-        # STATISTICHE VITALI
         st.divider()
         col_hp, col_ca = st.columns(2)
         col_hp.metric("❤️ HP", f"{st.session_state.hp}/{st.session_state.hp_max}")
         col_ca.metric("🛡️ CA", st.session_state.ca)
 
-        # --- CARATTERISTICHE (VISIBILI) ---
         st.write("### 📊 Caratteristiche")
         cols_stats = st.columns(3)
         stats_list = list(p['stats'].items())
@@ -150,7 +194,6 @@ with st.sidebar:
             s, v = stats_list[i]
             cols_stats[i%3].write(f"**{s[:3]}**: {v}\n({calcola_mod(v):+})")
 
-        # --- MAGIE E SLOT (VISIBILI SE APPLICABILI) ---
         if p['magie']:
             st.divider()
             st.write("### 🪄 Magie")
@@ -159,7 +202,6 @@ with st.sidebar:
             for m in p['magie']:
                 st.caption(f"✨ {m}")
 
-        # BESTIARIO
         if st.session_state.nemico_corrente:
             st.divider()
             n = st.session_state.nemico_corrente
@@ -167,7 +209,6 @@ with st.sidebar:
             st.write(f"HP: {n['hp']} | CA: {n['ca']}")
             st.progress(max(0.0, min(1.0, n['hp'] / n['hp_max'])))
 
-        # Altro (Expander per non ingombrare)
         with st.expander("🎒 Inventario & Oro"):
             st.write(f"💰 Oro: {st.session_state.oro}")
             for i in st.session_state.inventario: st.write(f"- {i}")
@@ -178,7 +219,6 @@ with st.sidebar:
                 if sk in p['competenze']: b += st.session_state.bonus_competenza
                 st.write(f"{'●' if sk in p['competenze'] else '○'} {sk}: {b:+}")
 
-        # SALVATAGGIO
         st.divider()
         sd = {k: v for k, v in st.session_state.items() if k != "temp_stats"}
         st.download_button("💾 Salva", data=json.dumps(sd), file_name="hero.json")
@@ -227,15 +267,13 @@ if st.session_state.game_phase == "creazione":
 else:
     st.title("🛡️ Avventura")
     
-    # Intro
     if st.session_state.messages and st.session_state.messages[-1]["content"] == "START_INTRO":
         p = st.session_state.personaggio
-        res = model.generate_content(f"DM. Inizia avventura per {p['nome']} ({p['classe']}). Usa [[LUOGO:desc]].").text
-        img = genera_img(res.split("[[LUOGO:")[1].split("]]")[0], "Scena") if "[[LUOGO:" in res else None
-        st.session_state.messages[-1] = {"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img}
+        res_raw = model.generate_content(f"DM 5e. Inizia avventura per {p['nome']} ({p['classe']}). Usa i tag come [[LUOGO:desc]] e [[NEMICO:nome|hp|ca]].").text
+        testo, img = processa_risposta_dm(res_raw)
+        st.session_state.messages[-1] = {"role": "assistant", "content": testo, "image_url": img}
         st.rerun()
 
-    # Chat
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
@@ -245,25 +283,14 @@ else:
     if prompt := st.chat_input("Cosa fai?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         p = st.session_state.personaggio
-        sys = (f"DM 5e. PG: {p['nome']} {p['classe']}. HP:{st.session_state.hp}. Dado:{st.session_state.ultimo_tiro}. "
-               f"Usa [[NEMICO:nome|hp|ca]], [[DANNO_NEMICO:n]], [[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
-        res = model.generate_content(sys + "\n" + prompt).text
+        sys = (f"Sei il DM di D&D 5e. PG: {p['nome']} ({p['classe']}). HP:{st.session_state.hp}. Ultimo Dado:{st.session_state.ultimo_tiro}. "
+               f"Se inserisci un nemico, scrivi il tag [[NEMICO:Nome|HP|CA]] proprio nel punto della frase dove deve apparire il nome. "
+               f"Tag: [[NEMICO:nome|hp|ca]], [[DANNO_NEMICO:n]], [[LOOT:rarità]], [[DANNO:n]], [[ORO:n]], [[XP:n]], [[LUOGO:desc]].")
         
-        # Meccaniche
-        n_m = re.search(r'\[\[NEMICO:(.*?)\|(.*?)\|(.*?)\]\]', res)
-        if n_m: st.session_state.nemico_corrente = {"nome": n_m.group(1), "hp": int(n_m.group(2)), "hp_max": int(n_m.group(2)), "ca": int(n_m.group(3))}
-        dn_m = re.search(r'\[\[DANNO_NEMICO:(\d+)\]\]', res)
-        if dn_m and st.session_state.nemico_corrente:
-            st.session_state.nemico_corrente["hp"] -= int(dn_m.group(1))
-            if st.session_state.nemico_corrente["hp"] <= 0: st.session_state.nemico_corrente = None
-        xp_m = re.search(r'\[\[XP:(\d+)\]\]', res)
-        if xp_m: st.session_state.xp += int(xp_m.group(1))
-        o_m = re.search(r'\[\[ORO:(-?\d+)\]\]', res)
-        if o_m: st.session_state.oro = max(0, st.session_state.oro + int(o_m.group(1)))
-        d_m = re.search(r'\[\[DANNO:(\d+)\]\]', res)
-        if d_m: st.session_state.hp = max(0, st.session_state.hp - int(d_m.group(1)))
-
-        img = genera_img(res.split("[[LUOGO:")[1].split("]]")[0], "Scena") if "[[LUOGO:" in res else None
-        st.session_state.messages.append({"role": "assistant", "content": re.sub(r'\[\[.*?\]\]', '', res).strip(), "image_url": img})
+        res_raw = model.generate_content(sys + "\n" + prompt).text
+        testo, img = processa_risposta_dm(res_raw)
+        
+        st.session_state.messages.append({"role": "assistant", "content": testo, "image_url": img})
         st.session_state.ultimo_tiro = None
         st.rerun()
+        
