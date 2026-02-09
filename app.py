@@ -244,35 +244,39 @@ with st.sidebar:
             # SEZIONE COMBATTIMENTO/RIPOSO MIGLIORATA
             c1, c2 = st.columns(2)
             
-            # Bottone Attacco Intelligente
+            # MENU SELEZIONE ARMA (Nuova Implementazione)
             with c1:
-                # Determina l'arma principale dall'inventario per il tooltip
-                main_weapon = "Pugno"
-                dice_dmg = "1d4"
-                stat_atk = "Forza"
+                # 1. Trova armi nell'inventario
+                weapons_found = []
                 for item in st.session_state.inventario:
-                    if "Spada" in item or "Mazza" in item: 
-                        main_weapon = item.split(" (")[0]
-                        dice_dmg = "1d8" if "Lunga" in item else "1d6"
-                        break
-                    elif "Arco" in item or "Daga" in item:
-                        main_weapon = item.split(" (")[0]
-                        dice_dmg = "1d8" if "Lungo" in item else "1d6" if "Corto" in item else "1d4"
-                        stat_atk = "Destrezza"
-                        break
+                    # Logica base per identificare armi e stat associata
+                    if any(x in item for x in ["Spada", "Mazza", "Ascia", "Martello", "Bastone"]):
+                         dice = "1d8" if "Lunga" in item or "Ascia" in item else ("1d4" if "Daga" in item else "1d6")
+                         weapons_found.append({"label": item, "stat": "Forza", "dice": dice})
+                    elif any(x in item for x in ["Arco", "Daga", "Balestra", "Fionda"]):
+                         dice = "1d8" if "Lungo" in item or "Balestra" in item else ("1d4" if "Daga" in item else "1d6")
+                         weapons_found.append({"label": item, "stat": "Destrezza", "dice": dice})
                 
-                if st.button(f"⚔️ {main_weapon}"):
-                    mod = calcola_mod(p['stats'][stat_atk])
+                # Fallback Pugno
+                if not weapons_found:
+                    weapons_found.append({"label": "Pugno", "stat": "Forza", "dice": "1d4"})
+                
+                # 2. Selectbox per scegliere l'arma
+                selected_weapon = st.selectbox("Scegli Arma", weapons_found, format_func=lambda x: x["label"].split('(')[0], label_visibility="collapsed")
+                
+                # 3. Tasto Attacco Dinamico
+                if st.button(f"⚔️ Usa {selected_weapon['label'].split('(')[0]}"):
+                    mod = calcola_mod(p['stats'][selected_weapon['stat']])
                     tiro_atk = random.randint(1, 20)
                     tot_atk = tiro_atk + mod + st.session_state.bonus_competenza
                     
-                    danno, _ = tira_dado(dice_dmg)
+                    danno, _ = tira_dado(selected_weapon['dice'])
                     danno_tot = max(1, danno + mod)
                     
                     # Genera Azione Strutturata per LLM
-                    action_str = (f"[AZIONE_COMBAT: Attacco con {main_weapon} | "
+                    action_str = (f"[AZIONE_COMBAT: Attacco con {selected_weapon['label'].split('(')[0]} ({selected_weapon['stat']}) | "
                                   f"TxC: {tot_atk} (d20:{tiro_atk}+{mod}+prof) | "
-                                  f"Danni: {danno_tot} ({dice_dmg}+{mod})]")
+                                  f"Danni: {danno_tot} ({selected_weapon['dice']}+{mod})]")
                     st.session_state.pending_action = action_str
                     st.session_state.ultimo_tiro = f"Atk: {tot_atk} | Dmg: {danno_tot}"
 
@@ -296,7 +300,6 @@ with st.sidebar:
                             st.session_state.hp = min(st.session_state.hp_max, st.session_state.hp + heal)
                             st.session_state.hit_dice_curr -= 1
                             
-                            # Recupero slot Warlock (non implementato qui, ma predisposto)
                             aggiorna_diario(f"Riposo Breve: Curati {heal} HP")
                             st.session_state.pending_action = f"[AZIONE: Riposo Breve. Speso 1 Dado Vita. Curati {heal} HP.]"
                             st.toast(f"Curati {heal} HP")
@@ -583,4 +586,4 @@ else:
             
         except Exception as e:
             st.error(f"Errore API: {e}")
-        
+            
